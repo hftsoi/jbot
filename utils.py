@@ -1008,19 +1008,26 @@ def plot_attention(transformer, n_heads, n_layers, x_sample, y_sample, lw=0.8):
     _, attn_scores = mha_last(x, x, return_attention_scores=True)
     model_re = tf.keras.Model(x_in, attn_scores)
 
-    class_names = ['q', 'g', 'W', 'Z', 't']
+    class_names_all = ['q', 'g', 'W', 'Z', 't']
+    y_arg = y_sample.argmax(axis=1)
+
+    # keep only classes that actually exist in y_sample (preserve original order)
+    present_cols = [i for i, _ in enumerate(class_names_all) if np.any(y_arg == i)]
+    present_names = [class_names_all[i] for i in present_cols]
+    n_cols = len(present_cols)
+
     rows = 1 + n_heads
 
-    fig = plt.figure(figsize=(15, 3*rows))
+    fig = plt.figure(figsize=(3*n_cols, 3*rows))
     gs = fig.add_gridspec(2, 1, height_ratios=[1, n_heads], hspace=0.04)
 
-    gs_top = gs[0].subgridspec(1, 5, wspace=0, hspace=0)
-    gs_bottom = gs[1].subgridspec(n_heads, 5, wspace=0, hspace=0)
+    gs_top = gs[0].subgridspec(1, n_cols, wspace=0, hspace=0)
+    gs_bottom = gs[1].subgridspec(n_heads, n_cols, wspace=0, hspace=0)
 
-    axes = np.empty((rows, 5), dtype=object)
+    axes = np.empty((rows, n_cols), dtype=object)
 
     # first row (input)
-    for c in range(5):
+    for c in range(n_cols):
         if c == 0:
             axes[0, 0] = fig.add_subplot(gs_top[0, 0])
             ref_top = axes[0, 0]
@@ -1029,15 +1036,19 @@ def plot_attention(transformer, n_heads, n_layers, x_sample, y_sample, lw=0.8):
 
     # remaining rows (attention heads)
     for r in range(n_heads):
-        for c in range(5):
+        for c in range(n_cols):
             if r == 0 and c == 0:
                 axes[1, 0] = fig.add_subplot(gs_bottom[0, 0])
                 ref_bottom = axes[1, 0]
             else:
                 axes[1+r, c] = fig.add_subplot(gs_bottom[r, c], sharex=ref_bottom, sharey=ref_bottom)
 
-    for col, cname in enumerate(class_names):
-        idx = np.where(y_sample.argmax(axis=1)==col)[0][0]
+    for col, (orig_class_idx, cname) in enumerate(zip(present_cols, present_names)):
+        idxs = np.where(y_arg == orig_class_idx)[0]
+        if idxs.size == 0:
+            continue  # extra safety; should not happen due to present_cols filter
+        idx = idxs[0]
+
         jet = x_sample[idx][None, ...].astype("float32") # (1,30,4)
         scores = model_re(jet).numpy()[0] # (n_heads, 31, 31)
         QUERYcls_KEYpatch = scores[:, 0, 1:] # (n_heads, 30)
@@ -1053,7 +1064,7 @@ def plot_attention(transformer, n_heads, n_layers, x_sample, y_sample, lw=0.8):
         ax0.set_title(f"{cname}", fontsize=14)
         ax0.set_xlim(-0.4, 0.4)
         ax0.set_ylim(-0.4, 0.4)
-        if col==0:
+        if col == 0:
             ax0.set_ylabel("input", fontsize=14)
 
         # attention heads (attention encoded as alpha)
@@ -1070,7 +1081,7 @@ def plot_attention(transformer, n_heads, n_layers, x_sample, y_sample, lw=0.8):
 
             ax = axes[1+h, col]
             ax.scatter(eta, phi, s=pt*1e4, facecolors="none", edgecolors=edge_rgba, linewidths=lw)
-            if col==0:
+            if col == 0:
                 ax.set_ylabel(f"head {h}", fontsize=14)
             ax.set_xlim(-0.4, 0.4)
             ax.set_ylim(-0.4, 0.4)
@@ -1111,19 +1122,23 @@ def plot_tSNE_cls(n_samples, backbone, x, y):
     class_names = ['q', 'g', 'W', 'Z', 't']
     class_colors = {'q': 'C3', 'g': 'C1', 'W': 'C2', 'Z': 'C0', 't': 'C4'}
 
+    present = [class_names[k] for k in range(len(class_names)) if np.any(y_sample == k)]
+
     cls_s, _ = backbone(x_sample, training=False)
-    z_backbone = cls_s.numpy() # (N, d_model)
+    z_backbone = cls_s.numpy()
     tsne_backbone = TSNE(n_components=2, random_state=42).fit_transform(z_backbone)
 
     fig, ax = plt.subplots(1, 1, figsize=(5, 4.5))
     ax0 = ax[0] if isinstance(ax, np.ndarray) else ax
-    for k, c in enumerate(class_names):
-        color = class_colors[c]
+
+    for c in present:
+        k = class_names.index(c)
         ax0.scatter(
             tsne_backbone[y_sample == k, 0],
             tsne_backbone[y_sample == k, 1],
-            s=10, label=c, color=color, alpha=0.4
+            s=10, label=c, color=class_colors[c], alpha=0.4
         )
+
     ax0.set_title("t-SNE of [CLS] embedding")
     ax0.legend(markerscale=2.5)
     ax0.tick_params(
@@ -1142,16 +1157,15 @@ def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples=5000, n_components=
     class_names = ['q', 'g', 'W', 'Z', 't']
     class_colors = {'q': 'C3', 'g': 'C1', 'W': 'C2', 'Z': 'C0', 't': 'C4'}
 
-    # CLS embedding from backbone
+    present = [class_names[k] for k in range(len(class_names)) if np.any(y_sample == k)]
+
     cls_s, _ = backbone(x_sample, training=False)
     z = cls_s.numpy()
 
-    # PCA on embeddings
     pca = PCA(n_components=n_components, random_state=42)
     z_pca = pca.fit_transform(z)
 
     pc_names = [f"PC{i+1}" for i in range(n_components)]
-
     df = pd.DataFrame(z_pca, columns=pc_names)
     df["class"] = [class_names[i] for i in y_sample]
 
@@ -1159,7 +1173,7 @@ def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples=5000, n_components=
         df,
         vars=pc_names,
         hue="class",
-        hue_order=class_names,
+        hue_order=present,
         palette=class_colors,
         diag_kind="kde",
         plot_kws=dict(alpha=0.4, s=10, edgecolor="none"),
@@ -1170,7 +1184,6 @@ def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples=5000, n_components=
     )
 
     n = len(pc_names)
-
     for i in range(n):
         for j in range(n):
             ax = g.axes[i, j]
@@ -1183,19 +1196,16 @@ def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples=5000, n_components=
             ax.spines["bottom"].set_visible(True)
 
     axis_label_size = 16
-    # bottom row
     for j, pc in enumerate(pc_names):
         ax = g.axes[n-1, j]
         if ax is not None:
             ax.set_xlabel(pc, fontsize=axis_label_size)
 
-    # left column
     for i, pc in enumerate(pc_names):
         ax = g.axes[i, 0]
         if ax is not None:
             ax.set_ylabel(pc, fontsize=axis_label_size)
 
-    # legend
     leg = g._legend
     if leg is not None:
         leg.set_title("")
@@ -1209,7 +1219,6 @@ def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples=5000, n_components=
             if hasattr(h, "set_markersize"):
                 h.set_markersize(12)
 
-        # legend text size
         for txt in leg.texts:
             txt.set_fontsize(20)
 
@@ -1221,7 +1230,7 @@ def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples=5000, n_components=
         frame.set_alpha(0.9)
 
         leg.set_bbox_to_anchor((0.9, 1.0), transform=g.fig.transFigure)
-        leg._loc = 1  # 'upper right'
+        leg._loc = 1
 
     g.fig.suptitle("PCA corner plot of [CLS] embedding", y=1.02, fontsize=20)
     plt.show()
