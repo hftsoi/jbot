@@ -18,7 +18,7 @@ import keras
 from keras.layers import *
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.neighbors import KNeighborsClassifier, NearestNeighbors
-from sklearn.metrics import roc_curve, auc, accuracy_score
+from sklearn.metrics import roc_curve, auc, accuracy_score, roc_auc_score
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import label_binarize, StandardScaler
 from keras.utils import Progbar
@@ -1294,3 +1294,371 @@ def report_acc(y_true, y_pred, model_name, k_folds=10):
     mean_acc = accs.mean()
     std_acc = accs.std()
     print(f"accuracy: {acc:.3f} ({mean_acc:.3f} +/- {std_acc:.3f}) [{model_name}]")
+
+def plot_ad_score_hist(score, y5, title):    
+    yi = np.argmax(y5, axis=1)
+    m_q = (yi == 0); m_g = (yi == 1); m_w = (yi == 2); m_z = (yi == 3); m_t = (yi == 4)
+    groups = {"QCD": score[m_q | m_g], "W": score[m_w], "Z": score[m_z], "t": score[m_t]}
+
+    #colors = {"QCD": "black", "W": 'C2', "Z": 'C0', "t": 'C4'}
+    
+    plt.figure(figsize=(5, 4))
+    for label in ["QCD", "W", "Z", "t"]:
+        plt.hist(groups[label], bins=100, density=True, histtype="step", linewidth=1.5, label=f"{label}")
+
+    plt.xlabel("Anomaly score")
+    plt.ylabel("Density")
+    plt.legend(loc="upper right")
+    plt.title(title)
+    plt.tight_layout()
+    plt.show()
+
+def plot_ad_roc_one_score_three_signals(score, y5, title):
+    class_colors = {'q': 'C3', 'g': 'C1', 'W': 'C2', 'Z': 'C0', 't': 'C4'}
+    yi = np.argmax(y5, axis=1)
+    bkg = (yi == 0) | (yi == 1)
+
+    plt.figure(figsize=(7, 6))
+    for sig_name, sig_idx in [("W", 2), ("Z", 3), ("t", 4)]:
+        sig = (yi == sig_idx)
+        m = bkg | sig
+        y_bin = sig[m].astype(int)
+        s = np.asarray(score)[m]
+
+        fpr, tpr, _ = roc_curve(y_bin, s)
+        plt.plot(tpr, fpr, label=f"{sig_name} (AUC={auc(fpr,tpr):.4f})", lw=1.5)
+
+    plt.yscale("log")
+    plt.ylim(1e-3, 1)
+    plt.xlim(0, 1)
+    plt.xlabel("TPR", fontsize=16)
+    plt.ylabel("FPR", fontsize=16)
+    plt.title(title, fontsize=16)
+    plt.legend(loc="lower right", fontsize=9)
+    plt.grid(alpha=0.5)
+    plt.tight_layout()
+    plt.show()
+
+def plot_ad_roc_mult_scores_one_signal(scores_dict, y5, signal):
+    name_to_idx = {"W": 2, "Z": 3, "t": 4}
+    sig_idx = name_to_idx[signal]
+    yi = np.argmax(y5, axis=1)
+    bkg = (yi == 0) | (yi == 1)
+    sig = (yi == sig_idx)
+    m = bkg | sig
+
+    plt.figure(figsize=(7, 6))
+    y_bin = sig[m].astype(int)
+
+    for name, score in scores_dict.items():
+        s = np.asarray(score)[m]
+        fpr, tpr, _ = roc_curve(y_bin, s)
+        plt.plot(tpr, fpr, label=f"{name} ({auc(fpr,tpr):.4f})", lw=1.5)
+
+    plt.yscale("log")
+    plt.ylim(1e-3, 1)
+    plt.xlim(0, 1)
+    plt.xlabel("TPR", fontsize=16)
+    plt.ylabel("FPR", fontsize=16)
+    plt.title(f"{signal} vs QCD", fontsize=16)
+    plt.legend(loc="lower right", fontsize=9)
+    plt.grid(alpha=0.5)
+    plt.tight_layout()
+    plt.show()
+
+#-------------------------------------- AD score metrics --------------------------------------
+
+def get_cls_embeddings(backbone, x):
+    ds = tf.data.Dataset.from_tensor_slices(x).batch(4096)
+    out = []
+    for i, xb in enumerate(ds):
+        cls, _ = backbone(xb, training=False)
+        out.append(cls.numpy())
+    return np.concatenate(out, axis=0)
+
+def l2_normalize(z, axis=1):
+    n = np.linalg.norm(z, axis=axis, keepdims=True)
+    return z / np.maximum(n, 1e-12)
+
+def make_bank(z_train, M, seed):
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(z_train.shape[0], size=M, replace=False)
+    return z_train[idx]
+
+def knn_distances(z_bank, z_test, l2norm, kmax):
+    if l2norm:
+        z_bank = l2_normalize(z_bank)
+        z_test = l2_normalize(z_test)
+
+    knn = NearestNeighbors(n_neighbors=kmax, metric="euclidean", n_jobs=-1)
+    knn.fit(z_bank)
+    
+    # out = (N_test, kmax), with kmax sorted by increasing distance
+    dists, _ = knn.kneighbors(z_test, return_distance=True)
+    return dists
+
+def knn_aggregate(dists, k, agg):
+    d = dists[:, :k]
+    if agg == "mean":
+        return d.mean(axis=1)
+    if agg == "median":
+        return np.median(d, axis=1)
+    if agg == "max":
+        return d.max(axis=1)
+    raise ValueError("agg = 'mean' / 'median' / 'max'")
+
+def mahalanobis(z_bank, z_test, l2norm):
+    if l2norm:
+        z_bank = l2_normalize(z_bank)
+        z_test = l2_normalize(z_test)
+
+    mu = z_bank.mean(axis=0, keepdims=True)
+    Xc = z_bank - mu
+    cov = (Xc.T @ Xc) / max(1, (Xc.shape[0] - 1))
+    cov = cov + 1e-3 * np.eye(cov.shape[0], dtype=cov.dtype)
+
+    L = np.linalg.cholesky(cov)
+    Yc = (z_test - mu).T
+    v = np.linalg.solve(L, Yc) 
+    score = np.sum(v*v, axis=0)
+    return score
+
+def cosine_similarities(z_bank, z_test, kmax):
+    z_bank = l2_normalize(z_bank)
+    z_test = l2_normalize(z_test)
+    nn = NearestNeighbors(n_neighbors=kmax, metric="cosine", n_jobs=-1)
+    nn.fit(z_bank)
+    cos_dist, _ = nn.kneighbors(z_test, return_distance=True)
+    sims = 1 - cos_dist
+    return sims
+
+def cosine_aggregate(sims, k, agg, temp):
+    s = sims[:, :k]
+    if agg == "max":
+        return 1 - s.max(axis=1)
+    if agg == "softmax_mean":
+        m = s.max(axis=1, keepdims=True)
+        w = np.exp((s - m) / temp)
+        w = w / np.maximum(w.sum(axis=1, keepdims=True), 1e-12)
+        return 1 - (w * s).sum(axis=1)
+    if agg == "logsumexp":
+        m = s.max(axis=1, keepdims=True)
+        sim_lse = m[:, 0] + temp * np.log(np.mean(np.exp((s - m) / temp), axis=1) + 1e-12)
+        return 1 - sim_lse
+    raise ValueError("agg = 'max' / 'softmax_mean' / 'logsumexp'")
+
+def run_ad_scan(
+    z_train, z_test, y5,
+    seed,
+    fpr_targets,
+    scan_maha,
+    scan_knn,
+    scan_cos,
+    highlight_top
+):
+    yi = np.argmax(y5, axis=1)
+
+    # metrics
+    def _tpr_at_fpr(y_true, score, fpr_target):
+        fpr, tpr, _ = roc_curve(y_true, score)
+        ok = np.where(fpr <= fpr_target)[0]
+        return 0 if ok.size == 0 else float(np.max(tpr[ok]))
+
+    def _eval_sig(score, sig_idx):
+        bg = (yi == 0) | (yi == 1)
+        sig = (yi == sig_idx)
+        m = bg | sig
+        if bg.sum() == 0 or sig.sum() == 0:
+            return tuple([np.nan] * (1 + len(fpr_targets)))
+        y_true = sig[m].astype(np.int32)
+        s = np.asarray(score, dtype=np.float32)[m]
+        aucv = float(roc_auc_score(y_true, s))
+        tprs = tuple(_tpr_at_fpr(y_true, s, t) for t in fpr_targets)
+        return (aucv,) + tprs
+
+    def _eval_all(score):
+        bg = (yi == 0) | (yi == 1)
+        sig = (yi == 2) | (yi == 3) | (yi == 4)
+        m = bg | sig
+        if bg.sum() == 0 or sig.sum() == 0:
+            return tuple([np.nan] * (1 + len(fpr_targets)))
+        y_true = sig[m].astype(np.int32)
+        s = np.asarray(score, dtype=np.float32)[m]
+        aucv = float(roc_auc_score(y_true, s))
+        tprs = tuple(_tpr_at_fpr(y_true, s, t) for t in fpr_targets)
+        return (aucv,) + tprs
+
+    # formatting / highlighting
+    def _strip_ansi(s):
+        import re
+        return re.sub(r"\x1b\[[0-9;]*m", "", s)
+
+    def _pad_vis(s, width):
+        vis = len(_strip_ansi(s))
+        if vis >= width:
+            return s
+        return s + " " * (width - vis)
+
+    # all highlighted entries are bold red
+    H_PRE, H_POST = ("\033[1;91m", "\033[0m")
+
+    def _fmt_num(v, rank=None):
+        s = f"{v:.4f}"
+        if rank is None:
+            return s
+        return f"{H_PRE}{s}{H_POST}"
+
+    def _default_tag(prefix, cfg):
+        keys = [k for k in cfg.keys()]
+        parts = [f"{k}={cfg[k]}" for k in keys]
+        return f"{prefix}(" + ", ".join(parts) + ")"
+
+    # collect rows
+    rows = [] # each: dict(group, tag, stats={"W":tuple,"Z":tuple,"t":tuple,"all":tuple})
+
+    # mahalanobis
+    if scan_maha:
+        prefix = scan_maha.get("name", "maha")
+        Ms = scan_maha.get("Ms", [])
+        l2s = scan_maha.get("l2", [False, True])
+        tag_fn = scan_maha.get("tag", None)
+
+        for M in Ms:
+            bank = make_bank(z_train, M=int(M), seed=seed)
+            for l2 in l2s:
+                score = mahalanobis(bank, z_test, l2norm=bool(l2))
+                stats = {
+                    "W": _eval_sig(score, 2),
+                    "Z": _eval_sig(score, 3),
+                    "t": _eval_sig(score, 4),
+                    "all": _eval_all(score),
+                }
+                cfg = {"M": int(M), "l2": bool(l2)}
+                tag = tag_fn(cfg) if callable(tag_fn) else _default_tag(prefix, cfg)
+                rows.append({"group": "maha", "tag": tag, "stats": stats})
+
+    # knn
+    if scan_knn:
+        prefix = scan_knn.get("name", "knn")
+        Ms = scan_knn.get("Ms", [])
+        l2s = scan_knn.get("l2", [True])
+        kmaxs = scan_knn.get("kmax", [])
+        ks = scan_knn.get("k", [])
+        aggs = scan_knn.get("agg", ["mean"])
+        tag_fn = scan_knn.get("tag", None)
+
+        for M in Ms:
+            bank = make_bank(z_train, M=int(M), seed=seed)
+            for l2 in l2s:
+                for kmax in kmaxs:
+                    dists = knn_distances(bank, z_test, l2norm=bool(l2), kmax=int(kmax))
+                    for k in ks:
+                        for agg in aggs:
+                            score = knn_aggregate(dists, k=int(k), agg=str(agg))
+                            stats = {
+                                "W": _eval_sig(score, 2),
+                                "Z": _eval_sig(score, 3),
+                                "t": _eval_sig(score, 4),
+                                "all": _eval_all(score),
+                            }
+                            cfg = {"M": int(M), "l2": bool(l2), "kmax": int(kmax), "k": int(k), "agg": str(agg)}
+                            tag = tag_fn(cfg) if callable(tag_fn) else _default_tag(prefix, cfg)
+                            rows.append({"group": "knn", "tag": tag, "stats": stats})
+
+    # cosine similarities
+    if scan_cos:
+        prefix = scan_cos.get("name", "cos")
+        Ms = scan_cos.get("Ms", [])
+        kmaxs = scan_cos.get("kmax", [])
+        ks = scan_cos.get("k", [])
+        aggs = scan_cos.get("agg", ["logsumexp"])
+        temps = scan_cos.get("temp", [0.1])
+        tag_fn = scan_cos.get("tag", None)
+
+        for M in Ms:
+            bank = make_bank(z_train, M=int(M), seed=seed)
+            for kmax in kmaxs:
+                sims = cosine_similarities(bank, z_test, kmax=int(kmax))
+                for k in ks:
+                    for agg in aggs:
+                        use_temps = [None] if str(agg) == "max" else temps
+                        for T in use_temps:
+                            score = cosine_aggregate(sims, k=int(k), agg=str(agg), temp=(None if T is None else float(T)))
+                            stats = {
+                                "W": _eval_sig(score, 2),
+                                "Z": _eval_sig(score, 3),
+                                "t": _eval_sig(score, 4),
+                                "all": _eval_all(score),
+                            }
+                            cfg = {"M": int(M), "kmax": int(kmax), "k": int(k), "agg": str(agg)}
+                            if T is not None:
+                                cfg["T"] = float(T)
+                            tag = tag_fn(cfg) if callable(tag_fn) else _default_tag(prefix, cfg)
+                            rows.append({"group": "cos", "tag": tag, "stats": stats})
+
+    # compute top-N
+    signals = ["W", "Z", "t", "all"]
+    n_metrics = 1 + len(fpr_targets) # auc + tpr@fpr targets
+    rank_map = {}
+
+    topN = int(highlight_top)
+    if topN < 0:
+        topN = 0
+
+    for sig in signals:
+        for j in range(n_metrics):
+            vals = np.array([r["stats"][sig][j] for r in rows], dtype=np.float64)
+            finite = np.isfinite(vals)
+            if finite.sum() == 0:
+                continue
+            idxs = np.where(finite)[0]
+            order = idxs[np.argsort(vals[idxs])[::-1]] # descending
+
+            topk = max(0, min(topN, order.size))
+            top = order[:topk]
+
+            for rank, ridx in enumerate(top):
+                rank_map[(ridx, sig, j)] = rank
+
+    # printing
+    fpr_lbl = ",".join([f"{t:g}" for t in fpr_targets])
+    col_names = [
+        f"W(AUC,{fpr_lbl})",
+        f"Z(AUC,{fpr_lbl})",
+        f"t(AUC,{fpr_lbl})",
+        f"all(AUC,{fpr_lbl})",
+    ]
+
+    tag_w = max(len(r["tag"]) for r in rows)
+    cell_w = 6 + (n_metrics - 1) * 8
+    header = (
+        f"{'tag':<{tag_w}} | "
+        f"{col_names[0]:<{cell_w}} | {col_names[1]:<{cell_w}} | {col_names[2]:<{cell_w}} | {col_names[3]:<{cell_w}}"
+    )
+    print(header)
+    print("-" * len(_strip_ansi(header)))
+
+    last_group = None
+    for i, r in enumerate(rows):
+        if last_group is not None and r["group"] != last_group:
+            print("")
+        last_group = r["group"]
+
+        def _cell(sig):
+            vals = r["stats"][sig]
+            parts = []
+            for j, v in enumerate(vals):
+                rank = rank_map.get((i, sig, j), None)
+                parts.append(_fmt_num(v, rank))
+            return "  ".join(parts)
+
+        cW = _pad_vis(_cell("W"), cell_w)
+        cZ = _pad_vis(_cell("Z"), cell_w)
+        ct = _pad_vis(_cell("t"), cell_w)
+        ca = _pad_vis(_cell("all"), cell_w)
+
+        line = f"{r['tag']:<{tag_w}} | {cW} | {cZ} | {ct} | {ca}"
+        print(line)
+
+
+
