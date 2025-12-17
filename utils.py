@@ -1023,7 +1023,7 @@ def maha_classifier_prob(z_train,
 
     return prob
     
-#-------------------------------------- plotting --------------------------------------
+#-------------------------------------- plotting / evaluation --------------------------------------
 
 def plot_jbot_training(history):
     fig, ax = plt.subplots(2, 3, figsize=(8, 4), sharex=False)
@@ -1432,6 +1432,37 @@ def plot_ad_roc_mult_scores_one_signal(scores_dict, y5, signal):
     plt.grid(alpha=0.5)
     plt.tight_layout()
     plt.show()
+
+def print_effsig_table(y_test, prob_dict, effbkg_targets):
+    def eff_signal_at_eff_bkg(y_true_bin, score, targets):
+        fpr, tpr, _ = roc_curve(y_true_bin, score)
+        out = {}
+        for eb in targets:
+            ok = np.where(fpr <= eb)[0]
+            out[eb] = np.max(tpr[ok]) if ok.size else 0
+        return out
+        
+    class_names=("q","g","W","Z","t"); col_w=26; method_w=12; val_w=6; prec=4
+    fmt = f"{{:>{val_w}.{prec}f}}"
+    eff_hdr_triplet = " ".join([fmt.format(t) for t in effbkg_targets])
+
+    header1 = " " * method_w + "".join([f"{c:^{col_w}s}" for c in class_names])
+    header2 = " " * method_w + "".join([f"{eff_hdr_triplet:>{col_w}s}" for _ in class_names])
+    print(header1)
+    print(header2)
+    print("-" * len(header1))
+
+    for method, p in prob_dict.items():
+        row_cells = []
+        for k in range(len(class_names)):
+            y_true = y_test[:, k] == 1
+            d = eff_signal_at_eff_bkg(y_true, p[:, k], effbkg_targets)
+            vals = [d[t] for t in effbkg_targets]
+            cell = " ".join([fmt.format(v) for v in vals])
+            row_cells.append(cell)
+
+        line = f"{method:<{method_w}s}" + "".join([f"{cell:>{col_w}s}" for cell in row_cells])
+        print(line)
 
 #-------------------------------------- AD score metrics --------------------------------------
 
