@@ -1302,24 +1302,23 @@ def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples=5000, n_components=
     g.fig.suptitle("PCA corner plot of [CLS] embedding", y=1.02, fontsize=20)
     plt.show()
 
-def plot_training_histories(hist_frozen, hist_standalone, history_ft, labels):
-    (label_frozen, label_standalone, label_ft) = labels
+def plot_training_histories(hist_standalone, history_ft, labels):
+    (label_standalone, label_ft) = labels
 
-    hf = hist_frozen.history
     hs = hist_standalone.history
 
-    epochs_frozen = np.arange(1, len(hf["loss"]) + 1)
+    #epochs_frozen = np.arange(1, len(hf["loss"]) + 1)
     epochs_standalone = np.arange(1, len(hs["loss"]) + 1)
     epochs_ft = np.arange(1, len(history_ft["train_loss"]) + 1)
 
     plt.figure(figsize=(8, 4))
     ax1 = plt.subplot(1, 2, 1)
     lw=2
-    ax1.plot(epochs_frozen, hf["loss"], label=f"{label_frozen} (train)", color="C0", linestyle="-", linewidth=lw)
+    #ax1.plot(epochs_frozen, hf["loss"], label=f"{label_frozen} (train)", color="C0", linestyle="-", linewidth=lw)
     ax1.plot(epochs_standalone, hs["loss"], label=f"{label_standalone} (train)", color="C1", linestyle="-", linewidth=lw)
     ax1.plot(epochs_ft, history_ft["train_loss"], label=f"{label_ft} (train)", color="C2", linestyle="-", linewidth=lw)
 
-    ax1.plot(epochs_frozen, hf["val_loss"], label=f"{label_frozen} (val)", color="C0", linestyle="--", linewidth=lw)
+    #ax1.plot(epochs_frozen, hf["val_loss"], label=f"{label_frozen} (val)", color="C0", linestyle="--", linewidth=lw)
     ax1.plot(epochs_standalone, hs["val_loss"], label=f"{label_standalone} (val)", color="C1", linestyle="--", linewidth=lw)
     ax1.plot(epochs_ft, history_ft["val_loss"], label=f"{label_ft} (val)", color="C2", linestyle="--", linewidth=lw)
 
@@ -1329,11 +1328,11 @@ def plot_training_histories(hist_frozen, hist_standalone, history_ft, labels):
 
     ax2 = plt.subplot(1, 2, 2)
 
-    ax2.plot(epochs_frozen, hf["accuracy"], label=f"{label_frozen} (train)", color="C0", linestyle="-", linewidth=lw)
+    #ax2.plot(epochs_frozen, hf["accuracy"], label=f"{label_frozen} (train)", color="C0", linestyle="-", linewidth=lw)
     ax2.plot(epochs_standalone, hs["accuracy"], label=f"{label_standalone} (train)", color="C1", linestyle="-", linewidth=lw)
     ax2.plot(epochs_ft, history_ft["train_acc"], label=f"{label_ft} (train)", color="C2", linestyle="-", linewidth=lw)
 
-    ax2.plot(epochs_frozen, hf["val_accuracy"], label=f"{label_frozen} (val)", color="C0", linestyle="--", linewidth=lw)
+    #ax2.plot(epochs_frozen, hf["val_accuracy"], label=f"{label_frozen} (val)", color="C0", linestyle="--", linewidth=lw)
     ax2.plot(epochs_standalone, hs["val_accuracy"], label=f"{label_standalone} (val)", color="C1", linestyle="--", linewidth=lw)
     ax2.plot(epochs_ft, history_ft["val_acc"], label=f"{label_ft} (val)", color="C2", linestyle="--", linewidth=lw)
 
