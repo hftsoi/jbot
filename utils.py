@@ -1343,23 +1343,121 @@ def plot_training_histories(hist_standalone, history_ft, labels):
     plt.tight_layout()
     plt.show()
 
-def report_acc(y_true, y_pred, model_name, k_folds=10):
-    y_true_cls = np.asarray(y_true).argmax(axis=1)
-    y_pred_cls = np.asarray(y_pred).argmax(axis=1)
+def report_acc_eff(y_true, prob_dict, class_names, eff_bkg_targets, k_folds):
+    col_w=22; method_w=14
+    y_true_cls = y_true.argmax(axis=1)
+    C = y_true.shape[1]
 
-    acc = accuracy_score(y_true_cls, y_pred_cls)
+    model_order = list(prob_dict.keys())
+    model_name_map = {}
 
+    def _display_name(key):
+        return model_name_map.get(key, key)
+
+    def _eff_signal_triplet(y_true_bin, score, targets):
+        fpr, tpr, _ = roc_curve(y_true_bin, score)
+        out = []
+        for eb in targets:
+            ok = np.where(fpr <= eb)[0]
+            out.append(np.max(tpr[ok]) if ok.size else 0)
+        return out
+
+    def _targets_str(targets):
+        return " ".join([f"{t:0.4f}" for t in targets])
+
+    print("Accuracy:")
+    max_name = max(len(_display_name(k)) for k in model_order)
+    name_w = max(12, max_name) + 1
+    
+    for key in model_order:
+        P = np.asarray(prob_dict[key])
+        y_pred_cls = P.argmax(axis=1)
+        acc = accuracy_score(y_true_cls, y_pred_cls)
+    
+        if k_folds > 1:
+            skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=42)
+            accs = []
+            for _, te_idx in skf.split(np.zeros_like(y_true_cls), y_true_cls):
+                accs.append(accuracy_score(y_true_cls[te_idx], y_pred_cls[te_idx]))
+            accs = np.asarray(accs)
+            print(f"{_display_name(key):<{name_w}s} {acc:.4f} ({accs.mean():.4f} +/- {accs.std():.4f})")
+        else:
+            print(f"{_display_name(key):<{name_w}s} {acc:.4f}")
+    print()
+
+    # eff without k-fold
+    per_model_cells = {}
+    for key in model_order:
+        P = prob_dict[key]
+        cells = []
+        for k in range(C):
+            y_true_bin = y_true[:, k]==1
+            vals = _eff_signal_triplet(y_true_bin, P[:, k], eff_bkg_targets)
+            cells.append(" ".join([f"{v:.4f}" for v in vals]))
+        per_model_cells[key] = cells
+
+    max_label = 0
+    for key in model_order:
+        max_label = max(max_label, len(_display_name(key)))
+    method_w_local = max(method_w, max_label + 1)
+
+    indent = " " * method_w_local
+    hdr1 = indent + "".join([f"{c:^{col_w}s}" for c in class_names])
+    hdr2 = indent + "".join([f"{_targets_str(eff_bkg_targets):>{col_w}s}" for _ in class_names])
+    print(hdr1)
+    print(hdr2)
+    print("-" * len(hdr1))
+
+    for key in model_order:
+        name = _display_name(key)
+        line = f"{name:<{method_w_local}s}" + "".join([f"{cell:>{col_w}s}" for cell in per_model_cells[key]])
+        print(line)
+    print()
+
+    # eff with k-fold
     skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=42)
 
-    accs = []
-    for _, test_idx in skf.split(np.zeros_like(y_true_cls), y_true_cls):
-        acc_fold = accuracy_score(y_true_cls[test_idx], y_pred_cls[test_idx])
-        accs.append(acc_fold)
+    model_fold_eff = {}
+    for key in model_order:
+        P = prob_dict[key]
+        fold_vals = []
+        for _, te_idx in skf.split(np.zeros_like(y_true_cls), y_true_cls):
+            y_te = y_true[te_idx]
+            P_te = P[te_idx]
+            fold_mat = np.zeros((C, len(eff_bkg_targets)))
+            for k in range(C):
+                y_true_bin = y_te[:, k]==1
+                fold_mat[k, :] = _eff_signal_triplet(y_true_bin, P_te[:, k], eff_bkg_targets)
+            fold_vals.append(fold_mat)
+        model_fold_eff[key] = np.stack(fold_vals, axis=0)
 
-    accs = np.array(accs)
-    mean_acc = accs.mean()
-    std_acc = accs.std()
-    print(f"accuracy: {acc:.4f} ({mean_acc:.4f} +/- {std_acc:.4f}) [{model_name}]")
+    max_label = 0
+    for key in model_order:
+        disp = _display_name(key)
+        max_label = max(max_label, len(f"{disp} mean"), len(f"{disp} std"))
+    method_w_local = max(method_w, max_label + 1)
+
+    indent = " " * method_w_local
+    hdr1 = indent + "".join([f"{c:^{col_w}s}" for c in class_names])
+    hdr2 = indent + "".join([f"{_targets_str(eff_bkg_targets):>{col_w}s}" for _ in class_names])
+    print(hdr1)
+    print(hdr2)
+    print("-" * len(hdr1))
+
+    for key in model_order:
+        disp = _display_name(key)
+        X = model_fold_eff[key]
+        mu = X.mean(axis=0)
+        std = X.std(axis=0)
+
+        mu_cells = [" ".join([f"{mu[k, j]:.4f}" for j in range(mu.shape[1])]) for k in range(C)]
+        std_cells = [" ".join([f"{std[k, j]:.4f}" for j in range(std.shape[1])]) for k in range(C)]
+
+        line_mu = f"{(disp + ' mean'):<{method_w_local}s}" + "".join([f"{cell:>{col_w}s}" for cell in mu_cells])
+        line_std = f"{(disp + ' std'):<{method_w_local}s}"  + "".join([f"{cell:>{col_w}s}" for cell in std_cells])
+
+        print(line_mu)
+        print(line_std)
 
 def plot_ad_score_hist(score, y5, title):    
     yi = np.argmax(y5, axis=1)
