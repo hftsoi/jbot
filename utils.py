@@ -5,6 +5,7 @@ import sys
 import tensorflow as tf
 tf.get_logger().setLevel("ERROR")
 import h5py
+import json
 import math
 import numpy as np
 import matplotlib.pyplot as plt
@@ -266,6 +267,29 @@ def load_jetnet(
     )
 
     return x_train, y_train, x_val, y_val, x_test, y_test, y_train_top, y_val_top, y_test_top
+
+def history_json(history, path, mode):
+    def _to_jsonable(x):
+        if isinstance(x, np.generic):
+            return x.item()
+        if isinstance(x, np.ndarray):
+            return x.astype(float).tolist()
+        return x
+
+    if mode == "save":
+        hist = {}
+        for k, v in history.items():
+            if isinstance(v, (list, tuple)):
+                hist[k] = [_to_jsonable(t) for t in v]
+            else:
+                hist[k] = _to_jsonable(v)
+        with open(path, "w") as f:
+            json.dump(hist, f, indent=2)
+
+    if mode == "load":
+        with open(path, "r") as f:
+            hist = json.load(f)
+        return hist
 
 #-------------------------------------- augmentations --------------------------------------
 
@@ -1025,7 +1049,7 @@ def maha_classifier_prob(z_train,
     
 #-------------------------------------- plotting / evaluation --------------------------------------
 
-def plot_jbot_training(history):
+def plot_jbot_pretraining(history):
     fig, ax = plt.subplots(2, 3, figsize=(8, 4), sharex=False)
     lw=2
     ax[0,0].plot(history["loss_total"], linewidth=lw)
