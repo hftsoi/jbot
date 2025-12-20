@@ -490,6 +490,16 @@ def build_mlp(dim_in, n_classes, name="mlp"):
     x = Dense(n_classes, activation='softmax')(x)
     return tf.keras.models.Model(x_in, x, name=name)
 
+def load_finetune(backbone_file, mlp_file, d_model, n_heads, n_layers, n_classes):
+    backbone = build_backbone(d_model, n_heads, n_layers, name="backbone")
+    backbone.load_weights(f"models/{backbone_file}.weights.h5")
+    mlp = build_mlp(d_model, n_classes=n_classes, name="mlp")
+    mlp.load_weights(f"models/{mlp_file}.weights.h5")
+    x_in = tf.keras.Input((30,4))
+    cls, _ = backbone(x_in)
+    x_out = mlp(cls)
+    return tf.keras.models.Model(x_in, x_out, name="model")
+
 #-------------------------------------- training --------------------------------------
 
 def tf_augment_batch(jets):
@@ -755,17 +765,60 @@ def train_jbot(x_train, epochs, batch_size, optimizer, base_lr, warmup_epochs, e
               f"norm(mask_token)={history['mask_token'][-1]:.3f}")
     return history
 
-def finetune_llrd(backbone, mlp,
-                  x_train, y_train,
-                  x_val, y_val,
-                  n_layers,
-                  base_lr, decay,
-                  epochs, batch_size,
-                  tolerance, patience):
-    # build model from passed backbone + mlp
+def train_standalone(
+    x_train,
+    y_train,
+    x_val,
+    y_val,
+    d_model,
+    n_heads,
+    n_layers,
+    n_classes,
+    lr,
+    epochs,
+    batch_size,
+    tolerance,
+    patience
+):
+    backbone_standalone = build_backbone(d_model, n_heads, n_layers, name="backbone_standalone")
+    mlp_standalone = build_mlp(d_model, n_classes=n_classes, name="mlp_standalone")
+    x_in = tf.keras.Input((30,4))
+    cls, _ = backbone_standalone(x_in)
+    x_out = mlp_standalone(cls)
+    model_standalone = tf.keras.models.Model(x_in, x_out, name="model_standalone")
+    model_standalone.compile(optimizer=keras.optimizers.Adam(learning_rate=lr), loss='categorical_crossentropy', metrics=['accuracy'])
+    
+    history_standalone = model_standalone.fit(
+        x_train, y_train,
+        validation_data=(x_val, y_val),
+        epochs=epochs, batch_size=batch_size, verbose=0,
+        callbacks=[EarlyStoppingLogger("supervised",epochs,patience,tolerance)]
+    )
+    return backbone_standalone, mlp_standalone, model_standalone, history_standalone
+    
+def finetune(
+    x_train,
+    y_train,
+    x_val,
+    y_val,
+    d_model,
+    n_heads,
+    n_layers,
+    n_classes,
+    backbone_pretrain,
+    base_lr,
+    decay,
+    epochs,
+    batch_size,
+    tolerance,
+    patience
+):
+    backbone_ft = build_backbone(d_model, n_heads, n_layers, name="backbone_ft")
+    backbone_ft.set_weights(backbone_pretrain.get_weights())
+    mlp_ft = build_mlp(d_model, n_classes=n_classes, name="mlp_ft")
     x_in = tf.keras.Input((30, 4))
-    cls, _ = backbone(x_in)
-    x_out = mlp(cls)
+    cls, _ = backbone_ft(x_in)
+    x_out = mlp_ft(cls)
     model = tf.keras.models.Model(x_in, x_out, name="model_finetune")
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=base_lr)
@@ -783,7 +836,7 @@ def finetune_llrd(backbone, mlp,
         group_lr = base_lr * (decay ** depth_from_last)
         mult = group_lr / base_lr
         for layer_name in group_names:
-            layer = backbone.get_layer(layer_name)
+            layer = backbone_ft.get_layer(layer_name)
             for v in layer.trainable_weights:
                 lr_multipliers_by_name[v.name] = mult
 
@@ -924,7 +977,7 @@ def finetune_llrd(backbone, mlp,
     if best_weights is not None:
         model.set_weights(best_weights)
 
-    return model, history
+    return backbone_ft, mlp_ft, model, history
 
 class EarlyStoppingLogger(keras.callbacks.Callback):
     def __init__(self, name, epochs, patience, min_delta):
@@ -1049,6 +1102,84 @@ def maha_classifier_prob(z_train,
     
 #-------------------------------------- plotting / evaluation --------------------------------------
 
+def plot_jets(x, y, idx):
+    fig, axs = plt.subplots(1, 5, figsize=(20, 4))
+    class_names = ['q', 'g', 'W', 'Z', 't']
+    
+    for i, class_name in enumerate(class_names):
+        class_idx = np.where(y.argmax(axis=1)==i)[0][idx]
+        jet = x[class_idx]
+        eta = jet[:,0]
+        phi = jet[:,1]
+        pt = jet[:,2]
+        mask = jet[:,3]
+        
+        eta = eta[mask==1]
+        phi = phi[mask==1]
+        pt = pt[mask==1]
+    
+        size = pt*10000
+    
+        axs[i].scatter(eta, phi, s=size, facecolors="none", edgecolors="C0", linewidths=0.8, alpha=0.5)
+        axs[i].set_xlabel("Eta")
+        axs[i].set_ylabel("Phi")
+        axs[i].set_title(class_name)
+        axs[i].set_xlim(-0.4, 0.4)
+        axs[i].set_ylim(-0.4, 0.4)
+    
+    plt.tight_layout()
+    plt.show()
+
+def plot_jets_aug(x, y, mask_ratio_range, idx):
+    fig, axes = plt.subplots(3, 5, figsize=(20, 12))
+    class_names = ['q', 'g', 'W', 'Z', 't']
+    
+    lw = 0.8
+    alpha = 0.5
+    for col, cname in enumerate(class_names):
+        jet_orig = x[np.where(y.argmax(axis=1)==col)[0][idx]]
+    
+        # row 0: original
+        eta, phi, pt, valid = jet_orig.T
+        m0 = (valid == 1)
+        axes[0, col].scatter(eta[m0], phi[m0], s=pt[m0]*1e4, facecolors="none", edgecolors="C0", linewidths=lw, alpha=alpha)
+        axes[0, col].set_title(f"{cname} [original]")
+    
+        # row 1: augmented
+        jet_aug = augment_jet(jet_orig)
+        eta, phi, pt, valid = jet_aug.T
+        m1 = (valid == 1)
+        axes[1, col].scatter(eta[m1], phi[m1], s=pt[m1]*1e4, facecolors="none", edgecolors="C0", linewidths=lw, alpha=alpha)
+        axes[1, col].set_title(f"{cname} [augmented]")
+    
+        # row 2: augmented + masks
+        r_target = float(RNG.uniform(mask_ratio_range[0], mask_ratio_range[1]))
+        jet_tf = tf.convert_to_tensor(jet_aug[None, ...], dtype=tf.float32)
+        mask_bool = tf_make_masks_pt_ratio(jet_tf, p_mask=1, ratio_range=(r_target, r_target)).numpy()[0].astype(bool)
+    
+        total_pt = float(pt[m1].sum())
+        masked_pt = float(pt[mask_bool].sum())
+        r_ach = masked_pt / total_pt
+    
+        unmasked = (valid == 1) & (~mask_bool)
+        masked = (valid == 1) & (mask_bool)
+
+        axes[2, col].scatter(eta[unmasked], phi[unmasked], s=pt[unmasked]*1e4, facecolors="none", edgecolors="C0", linewidths=lw, alpha=alpha)
+        axes[2, col].scatter(eta[masked], phi[masked], s=pt[masked]*1e4, facecolors="none", edgecolors="red", linewidths=lw, alpha=alpha)
+    
+        axes[2, col].set_title(f"{cname} [augmented+masked]")
+    
+        print(f"{cname}: r_target={r_target:.3f}, r_achieved={r_ach:.3f}, n_mask={masked.sum()} / n_valid={m1.sum()}")
+    
+        for row in range(3):
+            axes[row, col].set_xlim(-0.4, 0.4)
+            axes[row, col].set_ylim(-0.4, 0.4)
+            axes[row, col].set_xlabel("Eta")
+            axes[row, col].set_ylabel("Phi")
+    
+    plt.tight_layout()
+    plt.show()
+    
 def plot_jbot_pretraining(history):
     fig, ax = plt.subplots(2, 3, figsize=(8, 4), sharex=False)
     lw=2
@@ -1207,7 +1338,7 @@ def plot_softmax_prob_cls(n_samples, x, student, teacher, proj_head_s, proj_head
     plt.title("mean softmax prob. of projected [CLS]")
     plt.xlabel("K-dim")
     
-def plot_tSNE_cls(n_samples, backbone, x, y):
+def plot_tSNE_cls(n_samples, backbone, x, y, alpha, marker_size):
     x_sample = x[:n_samples].astype("float32")
     y_sample = y[:n_samples].argmax(1)
     class_names = ['q', 'g', 'W', 'Z', 't']
@@ -1227,7 +1358,7 @@ def plot_tSNE_cls(n_samples, backbone, x, y):
         ax0.scatter(
             tsne_backbone[y_sample == k, 0],
             tsne_backbone[y_sample == k, 1],
-            s=10, label=c, color=class_colors[c], alpha=0.4
+            s=marker_size, label=c, color=class_colors[c], alpha=alpha
         )
 
     ax0.set_title("t-SNE of [CLS] embedding")
@@ -1240,7 +1371,7 @@ def plot_tSNE_cls(n_samples, backbone, x, y):
     plt.tight_layout()
     plt.show()
     
-def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples=5000, n_components=4):
+def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples, n_components, alpha, marker_size):
     n_samples = min(n_samples, x.shape[0])
     x_sample = x[:n_samples].astype("float32")
     y_sample = y[:n_samples].argmax(1)
@@ -1267,7 +1398,7 @@ def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples=5000, n_components=
         hue_order=present,
         palette=class_colors,
         diag_kind="kde",
-        plot_kws=dict(alpha=0.4, s=10, edgecolor="none"),
+        plot_kws=dict(alpha=alpha, s=marker_size, edgecolor="none"),
         diag_kws=dict(fill=False, alpha=1, linewidth=3),
         corner=True,
         height=3,
@@ -1365,6 +1496,57 @@ def plot_training_histories(hist_standalone, history_ft, labels):
     ax2.legend(fontsize=10)
 
     plt.tight_layout()
+    plt.show()
+
+def pretrain_probe(backbone, x_train, y_train, x_test, y_test, knn_n):
+    z_cls_train = backbone.predict(x_train)[0]
+    z_cls_test = backbone.predict(x_test)[0]
+    
+    y_train_idx = y_train.argmax(1)
+    y_test_idx = y_test.argmax(1)
+    
+    knn = KNeighborsClassifier(n_neighbors=knn_n).fit(z_cls_train, y_train_idx)
+    acc_knn = accuracy_score(y_test_idx, knn.predict(z_cls_test))
+    
+    scaler = StandardScaler().fit(z_cls_train)
+    Z_cls_train = scaler.transform(z_cls_train)
+    Z_cls_test = scaler.transform(z_cls_test)
+    logreg = LogisticRegression(max_iter=1000).fit(Z_cls_train, y_train_idx)
+    acc_linear = accuracy_score(y_test_idx, logreg.predict(Z_cls_test))
+    
+    maha_p = maha_classifier_prob(z_cls_train, y_train_idx, z_cls_test, cov_tied=True, reg=1e-8, l2norm=True, temp=1.0)
+    acc_maha = accuracy_score(y_test_idx, maha_p.argmax(1))
+    knn_p = knn.predict_proba(z_cls_test)
+    linear_p = logreg.predict_proba(Z_cls_test)
+
+    print(f"maha acc:   {acc_maha:.4f}")
+    print(f"k-NN acc:   {acc_knn:.4f}")
+    print(f"linear acc: {acc_linear:.4f}")
+    print_effsig_table(y_test, {"kNN": knn_p, "linear": linear_p, "maha": maha_p}, (0.1, 0.01, 0.001))
+    
+    plt.figure(figsize=(7,6))
+    class_names = ['q', 'g', 'W', 'Z', 't']
+    class_colors = {'q': 'C3', 'g': 'C1', 'W': 'C2', 'Z': 'C0', 't': 'C4'}
+    
+    for k, c in enumerate(class_names):
+        fpr_knn, tpr_knn, _ = roc_curve(y_test[:, k], knn_p[:, k])
+        auc_knn = auc(fpr_knn, tpr_knn)
+        plt.plot(tpr_knn, fpr_knn, color=class_colors[c], label=f"{c} [k-NN] ({auc_knn:.4f})", linestyle="-", lw=1.5)
+    
+        fpr_linear, tpr_linear, _ = roc_curve(y_test[:, k], linear_p[:, k])
+        auc_linear = auc(fpr_linear, tpr_linear)
+        plt.plot(tpr_linear, fpr_linear, color=class_colors[c], label=f"{c} [linear] ({auc_linear:.4f})", linestyle="--", lw=1.5)
+    
+        fpr_maha, tpr_maha, _ = roc_curve(y_test[:, k], maha_p[:, k])
+        auc_maha = auc(fpr_maha, tpr_maha)
+        plt.plot(tpr_maha, fpr_maha, color=class_colors[c], label=f"{c} [maha] ({auc_maha:.4f})", linestyle="dotted", lw=1.5)
+    
+    plt.xlabel("TPR", size=16)
+    plt.ylabel("FPR", size=16)
+    plt.yscale("log")
+    plt.ylim(1e-4, 1)
+    plt.title("Pretrained [CLS] embedding", size=15)
+    plt.legend(fontsize=10, loc='lower right')
     plt.show()
 
 def report_acc_eff(y_true, prob_dict, class_names, eff_bkg_targets, k_folds):
@@ -1490,6 +1672,28 @@ def report_acc_eff(y_true, prob_dict, class_names, eff_bkg_targets, k_folds):
 
             print(line_mu)
             print(line_std)
+
+def plot_roc_ft(y_test, y_pred_standalone, y_pred_ft):
+    plt.figure(figsize=(7,6))
+    class_names = ['q','g','W','Z','t']
+    class_colors = ['C3','C1','C2','C0','C4']
+    
+    for k,c in enumerate(class_names):
+        fpr_standalone, tpr_standalone, _ = roc_curve(y_test[:,k], y_pred_standalone[:,k])
+        auc_standalone = auc(fpr_standalone, tpr_standalone)
+        plt.plot(tpr_standalone, fpr_standalone, color=class_colors[k], lw=1.5, linestyle='dashed', label=f"{c} [Supervised] ({auc_standalone:.4f})")
+    
+        fpr_ft, tpr_ft, _ = roc_curve(y_test[:,k], y_pred_ft[:,k])
+        auc_ft = auc(fpr_ft, tpr_ft)
+        plt.plot(tpr_ft, fpr_ft, color=class_colors[k], lw=1.5, linestyle='-', label=f"{c} [jBOT] ({auc_ft:.4f})")
+    
+    plt.xlabel("TPR", size=16)
+    plt.ylabel("FPR", size=16)
+    plt.yscale("log")
+    plt.ylim(1e-4,1)
+    plt.title("MLP head + [CLS] embedding", size=16)
+    plt.legend(fontsize=9)
+    plt.show()
 
 def plot_ad_score_hist(score, y5, title):    
     yi = np.argmax(y5, axis=1)
