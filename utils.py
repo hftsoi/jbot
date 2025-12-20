@@ -498,7 +498,8 @@ def load_finetune(backbone_file, mlp_file, d_model, n_heads, n_layers, n_classes
     x_in = tf.keras.Input((30,4))
     cls, _ = backbone(x_in)
     x_out = mlp(cls)
-    return tf.keras.models.Model(x_in, x_out, name="model")
+    model = tf.keras.models.Model(x_in, x_out, name="model")
+    return backbone, mlp, model
 
 #-------------------------------------- training --------------------------------------
 
@@ -1498,7 +1499,7 @@ def plot_training_histories(hist_standalone, history_ft, labels):
     plt.tight_layout()
     plt.show()
 
-def pretrain_probe(backbone, x_train, y_train, x_test, y_test, knn_n):
+def pretrain_probe_5class(backbone, x_train, y_train, x_test, y_test, knn_n):
     z_cls_train = backbone.predict(x_train)[0]
     z_cls_test = backbone.predict(x_test)[0]
     
@@ -1547,6 +1548,50 @@ def pretrain_probe(backbone, x_train, y_train, x_test, y_test, knn_n):
     plt.ylim(1e-4, 1)
     plt.title("Pretrained [CLS] embedding", size=15)
     plt.legend(fontsize=10, loc='lower right')
+    plt.show()
+
+def pretrain_probe_tqg(backbone, x_train, y_train_top, x_test, y_test_top, y_test_2, knn_n):
+    z_cls_train = backbone.predict(x_train)[0]
+    z_cls_test = backbone.predict(x_test)[0]
+    
+    knn = KNeighborsClassifier(n_neighbors=knn_n).fit(z_cls_train, y_train_top)
+    acc_knn = accuracy_score(y_test_top, knn.predict(z_cls_test))
+    knn_p = knn.predict_proba(z_cls_test)
+    
+    scaler = StandardScaler().fit(z_cls_train)
+    Z_train = scaler.transform(z_cls_train)
+    Z_test = scaler.transform(z_cls_test)
+    logreg = LogisticRegression(max_iter=2000).fit(Z_train, y_train_top)
+    acc_linear = accuracy_score(y_test_top, logreg.predict(Z_test))
+    linear_p = logreg.predict_proba(Z_test)
+    
+    maha_p = maha_classifier_prob(z_cls_train, y_train_top, z_cls_test, cov_tied=True, reg=1e-8, l2norm=True, temp=1.0)
+    acc_maha = accuracy_score(y_test_top, maha_p.argmax(1))
+    
+    #print(f"maha acc:   {acc_maha:.4f}")
+    #print(f"linear acc: {acc_linear:.4f}")
+    #print(f"k-NN acc:   {acc_knn:.4f}")
+    
+    report_acc_eff(y_test_2, {"maha": maha_p, "linear": linear_p, "k-NN": knn_p}, ("QCD","t"), (0.1, 0.01, 0.001), 10)
+
+    pos_k = 1
+    plt.figure(figsize=(7,6))
+    
+    fpr, tpr, _ = roc_curve(y_test_2[:, pos_k], knn_p[:, pos_k])
+    plt.plot(tpr, fpr, lw=1.5, linestyle="-", label=f"top [k-NN] ({auc(fpr,tpr):.4f})")
+    
+    fpr, tpr, _ = roc_curve(y_test_2[:, pos_k], linear_p[:, pos_k])
+    plt.plot(tpr, fpr, lw=1.5, linestyle="--", label=f"top [linear] ({auc(fpr,tpr):.4f})")
+    
+    fpr, tpr, _ = roc_curve(y_test_2[:, pos_k], maha_p[:, pos_k])
+    plt.plot(tpr, fpr, lw=1.5, linestyle="dotted", label=f"top [maha] ({auc(fpr,tpr):.4f})")
+
+    plt.xlabel("TPR", size=16)
+    plt.ylabel("FPR", size=16)
+    plt.yscale("log")
+    plt.ylim(1e-4, 1)
+    plt.title("Pretrained [CLS] embedding", size=15)
+    plt.legend(fontsize=10, loc="lower right")
     plt.show()
 
 def report_acc_eff(y_true, prob_dict, class_names, eff_bkg_targets, k_folds):
@@ -1673,7 +1718,7 @@ def report_acc_eff(y_true, prob_dict, class_names, eff_bkg_targets, k_folds):
             print(line_mu)
             print(line_std)
 
-def plot_roc_ft(y_test, y_pred_standalone, y_pred_ft):
+def plot_roc_ft_5class(y_test, y_pred_standalone, y_pred_ft):
     plt.figure(figsize=(7,6))
     class_names = ['q','g','W','Z','t']
     class_colors = ['C3','C1','C2','C0','C4']
@@ -1693,6 +1738,24 @@ def plot_roc_ft(y_test, y_pred_standalone, y_pred_ft):
     plt.ylim(1e-4,1)
     plt.title("MLP head + [CLS] embedding", size=16)
     plt.legend(fontsize=9)
+    plt.show()
+
+def plot_roc_ft_tqg(y_test_2, y_pred_standalone, y_pred_ft):
+    plt.figure(figsize=(7,6))
+    pos_k = 1
+    
+    fpr, tpr, _ = roc_curve(y_test_2[:,pos_k], y_pred_standalone[:,pos_k])
+    plt.plot(tpr, fpr, lw=1.8, linestyle='-', label=f"top [Supervised] ({auc(fpr,tpr):.4f})")
+    
+    fpr, tpr, _ = roc_curve(y_test_2[:,pos_k], y_pred_ft[:,pos_k])
+    plt.plot(tpr, fpr, lw=1.8, linestyle='--', label=f"top [jBOT] ({auc(fpr,tpr):.4f})")
+    
+    plt.xlabel("TPR", size=16)
+    plt.ylabel("FPR", size=16)
+    plt.yscale("log")
+    plt.ylim(1e-4,1)
+    plt.title("MLP head + CLS embedding", size=16)
+    plt.legend(fontsize=10, loc="lower right")
     plt.show()
 
 def plot_ad_score_hist(score, y5, title):    
