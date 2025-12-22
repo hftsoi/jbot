@@ -2,6 +2,7 @@ import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_CPP_MIN_VLOG_LEVEL"] = "0"
 import sys
+import re, glob
 import tensorflow as tf
 tf.get_logger().setLevel("ERROR")
 import h5py
@@ -175,6 +176,10 @@ def load_jetnet(
 
         q_tr = perm["q"][:n_q_tr]; q_te = perm["q"][n_q_tr:]
         g_tr = perm["g"][:n_g_tr]; g_te = perm["g"][n_g_tr:]
+
+        n_qg_te = min(len(q_te), len(g_te))
+        q_te = q_te[:n_qg_te]
+        g_te = g_te[:n_qg_te]
 
         x_train = np.concatenate([X["q"][q_tr], X["g"][g_tr]], axis=0)
         y_train = np.concatenate([Y["q"][q_tr], Y["g"][g_tr]], axis=0)
@@ -583,7 +588,9 @@ def train_jbot(x_train, epochs, batch_size, optimizer, base_lr, warmup_epochs, e
                mask_prob, mask_ratio_range, masker, center_cls, center_patch,
                center_beta, temp_t, temp_s,
                use_hint, hint_hidden,
-               lambda_koleo):
+               lambda_koleo,
+               save_student_snapshots,
+               snapshot_dir):
 
     token_emb_layer = student.get_layer("token_embedding")
     prepend_cls_layer = student.get_layer("prepend_cls")
@@ -700,6 +707,10 @@ def train_jbot(x_train, epochs, batch_size, optimizer, base_lr, warmup_epochs, e
         "mask_token": []
     }
 
+    if save_student_snapshots:
+        os.makedirs(snapshot_dir, exist_ok=False)
+        student.save_weights(f"{snapshot_dir}/student_epoch000.weights.h5")
+
     ds = (tf.data.Dataset.from_tensor_slices(x_train.astype("float32"))
           .shuffle(x_train.shape[0], seed=42)
           .batch(batch_size)
@@ -764,6 +775,9 @@ def train_jbot(x_train, epochs, batch_size, optimizer, base_lr, warmup_epochs, e
               f"norm(center_cls)={history['center_cls'][-1]:.3f}; "
               f"norm(center_patch)={history['center_patch'][-1]:.3f}; "
               f"norm(mask_token)={history['mask_token'][-1]:.3f}")
+
+        if save_student_snapshots:
+            student.save_weights(f"{snapshot_dir}/student_epoch{epoch+1:03d}.weights.h5")
     return history
 
 def train_standalone(
@@ -1457,6 +1471,19 @@ def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples, n_components, alph
 
     g.fig.suptitle("PCA corner plot of [CLS] embedding", y=1.02, fontsize=20)
     plt.show()
+
+def plot_sne_snapshots(snapshot_dir, x, y):
+    d_model, n_heads, n_layers = map(int, snapshot_dir.split("_")[-3:])
+    snapshots = sorted(
+        glob.glob(os.path.join(snapshot_dir, "student_epoch*.weights.h5")),
+        key=lambda p: int(re.search(r"epoch(\d+)", os.path.basename(p)).group(1))
+    )
+
+    for snapshot in snapshots:
+        print(snapshot)
+        student = build_backbone(d_model=d_model, n_heads=n_heads, n_layers=n_layers, name="backbone_student")
+        student.load_weights(snapshot)
+        plot_tSNE_cls(n_samples=5000, backbone=student, x=x, y=y, alpha=0.5, marker_size=10)
 
 def plot_training_histories(hist_standalone, history_ft, labels):
     (label_standalone, label_ft) = labels
