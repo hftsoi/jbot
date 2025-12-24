@@ -437,8 +437,8 @@ class TransformerBlock(Layer):
         self.ln1 = LayerNormalization(epsilon=1e-6)
         self.ln2 = LayerNormalization(epsilon=1e-6)
         self.ffn = tf.keras.Sequential([Dense(d_model*4, activation='gelu'), Dense(d_model)])
-        self.drop1 = Dropout(0.1)
-        self.drop2 = Dropout(0.1)
+        self.drop1 = Dropout(0.2)
+        self.drop2 = Dropout(0.2)
 
     def call(self, x):
         attn_out = self.mha(x, x)
@@ -489,9 +489,9 @@ class MaskTokens(keras.layers.Layer):
 def build_mlp(dim_in, n_classes, name="mlp"):
     x_in = Input(shape=(dim_in,))
     x = Dense(dim_in*2, activation='gelu')(x_in)
-    x = Dropout(0.1)(x)
+    x = Dropout(0.2)(x)
     x = Dense(dim_in*1, activation='gelu')(x)
-    x = Dropout(0.1)(x)
+    x = Dropout(0.2)(x)
     x = Dense(n_classes, activation='softmax')(x)
     return tf.keras.models.Model(x_in, x, name=name)
 
