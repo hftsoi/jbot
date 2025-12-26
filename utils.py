@@ -1195,7 +1195,7 @@ def plot_jets_aug(x, y, mask_ratio_range, idx):
     plt.tight_layout()
     plt.show()
     
-def plot_jbot_pretraining(history):
+def plot_jbot_pretraining(history, save_path=None):
     fig, ax = plt.subplots(2, 3, figsize=(8, 4), sharex=False)
     lw=2
     ax[0,0].plot(history["loss_total"], linewidth=lw)
@@ -1231,8 +1231,10 @@ def plot_jbot_pretraining(history):
     #ax[2,0].set_xlabel("Epoch")
     plt.tight_layout()
     plt.show()
+    if save_path is not None:
+        plt.savefig(f"{save_path}")
     
-def plot_attention(transformer, n_heads, n_layers, x_sample, y_sample, lw=0.8):
+def plot_attention(transformer, n_heads, n_layers, x_sample, y_sample, lw=0.8, save_path=None):
     last_block = transformer.get_layer(f"block_{n_layers-1}")
     mha_last = last_block.mha
 
@@ -1330,6 +1332,8 @@ def plot_attention(transformer, n_heads, n_layers, x_sample, y_sample, lw=0.8):
             labelbottom=False, labelleft=False
         )
     plt.show()
+    if save_path is not None:
+        plt.savefig(f"{save_path}")
 
 def plot_softmax_prob_cls(n_samples, x, student, teacher, proj_head_s, proj_head_t, center_cls, temp_t, temp_s):
     x_sample = x[:n_samples].astype("float32")
@@ -1353,7 +1357,7 @@ def plot_softmax_prob_cls(n_samples, x, student, teacher, proj_head_s, proj_head
     plt.title("mean softmax prob. of projected [CLS]")
     plt.xlabel("K-dim")
     
-def plot_tSNE_cls(n_samples, backbone, x, y, alpha, marker_size):
+def plot_tSNE_cls(n_samples, backbone, x, y, alpha, marker_size, save_path=None):
     x_sample = x[:n_samples].astype("float32")
     y_sample = y[:n_samples].argmax(1)
     class_names = ['q', 'g', 'W', 'Z', 't']
@@ -1376,7 +1380,7 @@ def plot_tSNE_cls(n_samples, backbone, x, y, alpha, marker_size):
             s=marker_size, label=c, color=class_colors[c], alpha=alpha
         )
 
-    ax0.set_title("t-SNE of [CLS] embedding")
+    #ax0.set_title("t-SNE of [CLS] embedding")
     ax0.legend(markerscale=2.5)
     ax0.tick_params(
         axis='both', which='both',
@@ -1385,6 +1389,9 @@ def plot_tSNE_cls(n_samples, backbone, x, y, alpha, marker_size):
     )
     plt.tight_layout()
     plt.show()
+    if save_path is not None:
+        plt.savefig(f"{save_path}")
+        
     
 def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples, n_components, alpha, marker_size):
     n_samples = min(n_samples, x.shape[0])
@@ -1472,18 +1479,21 @@ def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples, n_components, alph
     g.fig.suptitle("PCA corner plot of [CLS] embedding", y=1.02, fontsize=20)
     plt.show()
 
-def plot_sne_snapshots(snapshot_dir, x, y):
+def plot_sne_snapshots(snapshot_dir, x, y, save=False):
     d_model, n_heads, n_layers = map(int, snapshot_dir.split("_")[-3:])
     snapshots = sorted(
         glob.glob(os.path.join(snapshot_dir, "student_epoch*.weights.h5")),
         key=lambda p: int(re.search(r"epoch(\d+)", os.path.basename(p)).group(1))
     )
-
     for snapshot in snapshots:
         print(snapshot)
         student = build_backbone(d_model=d_model, n_heads=n_heads, n_layers=n_layers, name="backbone_student")
         student.load_weights(snapshot)
-        plot_tSNE_cls(n_samples=5000, backbone=student, x=x, y=y, alpha=0.5, marker_size=10)
+        save_path = None
+        if save:
+            epoch_str = re.search(r"epoch(\d+)", os.path.basename(snapshot)).group(1)
+            save_path = os.path.join(snapshot_dir, f"student_epoch{epoch_str}.png")
+        plot_tSNE_cls(n_samples=5000, backbone=student, x=x, y=y, alpha=0.5, marker_size=10, save_path=save_path)
 
 def plot_training_histories(hist_standalone, history_ft, labels):
     (label_standalone, label_ft) = labels
@@ -1745,7 +1755,7 @@ def report_acc_eff(y_true, prob_dict, class_names, eff_bkg_targets, k_folds):
             print(line_mu)
             print(line_std)
 
-def plot_roc_ft_5class(y_test, y_pred_standalone, y_pred_ft):
+def plot_roc_ft_5class(y_test, y_pred_standalone, y_pred_ft, save_path=None):
     plt.figure(figsize=(7,6))
     class_names = ['q','g','W','Z','t']
     class_colors = ['C3','C1','C2','C0','C4']
@@ -1766,8 +1776,10 @@ def plot_roc_ft_5class(y_test, y_pred_standalone, y_pred_ft):
     plt.title("MLP head + [CLS] embedding", size=16)
     plt.legend(fontsize=9)
     plt.show()
+    if save_path is not None:
+        plt.savefig(f"{save_path}")
 
-def plot_roc_ft_tqg(y_test_2, y_pred_standalone, y_pred_ft):
+def plot_roc_ft_tqg(y_test_2, y_pred_standalone, y_pred_ft, save_path=None):
     plt.figure(figsize=(7,6))
     pos_k = 1
     
@@ -1784,6 +1796,8 @@ def plot_roc_ft_tqg(y_test_2, y_pred_standalone, y_pred_ft):
     plt.title("MLP head + CLS embedding", size=16)
     plt.legend(fontsize=10, loc="lower right")
     plt.show()
+    if save_path is not None:
+        plt.savefig(f"{save_path}")
 
 def plot_ad_score_hist(score, y5, title):    
     yi = np.argmax(y5, axis=1)
