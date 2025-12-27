@@ -1230,9 +1230,9 @@ def plot_jbot_pretraining(history, save_path=None):
     #ax[2,0].set_title("Learnable mask token")
     #ax[2,0].set_xlabel("Epoch")
     plt.tight_layout()
-    plt.show()
     if save_path is not None:
         plt.savefig(f"{save_path}")
+    plt.show()
     
 def plot_attention(transformer, n_heads, n_layers, x_sample, y_sample, lw=0.8, save_path=None):
     last_block = transformer.get_layer(f"block_{n_layers-1}")
@@ -1331,9 +1331,9 @@ def plot_attention(transformer, n_heads, n_layers, x_sample, y_sample, lw=0.8, s
             bottom=False, top=False, left=False, right=False,
             labelbottom=False, labelleft=False
         )
-    plt.show()
     if save_path is not None:
         plt.savefig(f"{save_path}")
+    plt.show()
 
 def plot_softmax_prob_cls(n_samples, x, student, teacher, proj_head_s, proj_head_t, center_cls, temp_t, temp_s):
     x_sample = x[:n_samples].astype("float32")
@@ -1381,17 +1381,16 @@ def plot_tSNE_cls(n_samples, backbone, x, y, alpha, marker_size, save_path=None)
         )
 
     #ax0.set_title("t-SNE of [CLS] embedding")
-    ax0.legend(markerscale=2.5)
+    ax0.legend(markerscale=2.5, loc='upper right')
     ax0.tick_params(
         axis='both', which='both',
         bottom=False, top=False, left=False, right=False,
         labelbottom=False, labelleft=False
     )
     plt.tight_layout()
-    plt.show()
     if save_path is not None:
         plt.savefig(f"{save_path}")
-        
+    plt.show()
     
 def plot_pca_corner_cls_embeddings(backbone, x, y, n_samples, n_components, alpha, marker_size):
     n_samples = min(n_samples, x.shape[0])
@@ -1774,10 +1773,10 @@ def plot_roc_ft_5class(y_test, y_pred_standalone, y_pred_ft, save_path=None):
     plt.yscale("log")
     plt.ylim(1e-4,1)
     plt.title("MLP head + [CLS] embedding", size=16)
-    plt.legend(fontsize=9)
-    plt.show()
+    plt.legend(fontsize=9, loc='lower right')
     if save_path is not None:
         plt.savefig(f"{save_path}")
+    plt.show()
 
 def plot_roc_ft_tqg(y_test_2, y_pred_standalone, y_pred_ft, save_path=None):
     plt.figure(figsize=(7,6))
@@ -1795,9 +1794,9 @@ def plot_roc_ft_tqg(y_test_2, y_pred_standalone, y_pred_ft, save_path=None):
     plt.ylim(1e-4,1)
     plt.title("MLP head + CLS embedding", size=16)
     plt.legend(fontsize=10, loc="lower right")
-    plt.show()
     if save_path is not None:
         plt.savefig(f"{save_path}")
+    plt.show()
 
 def plot_ad_score_hist(score, y5, title):    
     yi = np.argmax(y5, axis=1)
