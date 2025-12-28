@@ -1537,7 +1537,7 @@ def plot_training_histories(hist_standalone, history_ft, labels):
     plt.tight_layout()
     plt.show()
 
-def pretrain_probe_5class(backbone, x_train, y_train, x_test, y_test, knn_n, k_folds):
+def pretrain_probe_5class(backbone, x_train, y_train, x_test, y_test, knn_n, k_folds=10):
     def _acc_auc_kfold(y_onehot, prob, k_folds=10, seed=42):
         y_idx = y_onehot.argmax(1)
         C = y_onehot.shape[1]
