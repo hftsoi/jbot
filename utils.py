@@ -1717,6 +1717,44 @@ def report_acc_eff(y_true, prob_dict, class_names, eff_bkg_targets, k_folds):
             print(f"{_display_name(key):<{name_w}s} {acc:.4f}")
     print()
 
+    print("AUC:")
+    if C == 2:
+        sel_idx = [1]
+        sel_names = [class_names[1]]
+    else:
+        sel_idx = list(range(C))
+        sel_names = list(class_names)
+    for key in model_order:
+        P = np.asarray(prob_dict[key])
+
+        aucs = []
+        for k in sel_idx:
+            y_true_bin = (y_true[:, k] == 1).astype(np.int32)
+            aucs.append(roc_auc_score(y_true_bin, P[:, k]))
+        aucs = np.asarray(aucs, dtype=np.float32)
+
+        if k_folds > 1:
+            skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=42)
+            fold_aucs = []
+            for _, te_idx in skf.split(np.zeros_like(y_true_cls), y_true_cls):
+                y_te = y_true[te_idx]
+                P_te = P[te_idx]
+                a = []
+                for k in sel_idx:
+                    y_bin = (y_te[:, k] == 1).astype(np.int32)
+                    a.append(roc_auc_score(y_bin, P_te[:, k]))
+                fold_aucs.append(a)
+            fold_aucs = np.asarray(fold_aucs, dtype=np.float32)
+
+            parts = []
+            for i, cname in enumerate(sel_names):
+                parts.append(f"{cname} {aucs[i]:.4f} ({fold_aucs[:, i].mean():.4f} +/- {fold_aucs[:, i].std():.4f})")
+            print(f"{_display_name(key):<{name_w}s} " + " | ".join(parts))
+        else:
+            parts = [f"{cname} {aucs[i]:.4f}" for i, cname in enumerate(sel_names)]
+            print(f"{_display_name(key):<{name_w}s} " + " | ".join(parts))
+    print()
+
     if C == 2:
         sel_idx = [1] # for t-vs-qg, select t as positive class
         sel_names = [class_names[1]]
