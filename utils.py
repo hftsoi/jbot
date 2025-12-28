@@ -1145,8 +1145,8 @@ def plot_jets(x, y, idx):
     plt.tight_layout()
     plt.show()
 
-def plot_jets_aug(x, y, mask_ratio_range, idx):
-    fig, axes = plt.subplots(3, 5, figsize=(20, 12))
+def plot_jets_aug(x, y, mask_ratio_range, idx, save_path=None):
+    fig, axes = plt.subplots(2, 5, figsize=(20, 8))
     class_names = ['q', 'g', 'W', 'Z', 't']
     
     lw = 0.8
@@ -1158,14 +1158,14 @@ def plot_jets_aug(x, y, mask_ratio_range, idx):
         eta, phi, pt, valid = jet_orig.T
         m0 = (valid == 1)
         axes[0, col].scatter(eta[m0], phi[m0], s=pt[m0]*1e4, facecolors="none", edgecolors="C0", linewidths=lw, alpha=alpha)
-        axes[0, col].set_title(f"{cname} [original]")
+        axes[0, col].set_title(f"{cname}", fontsize=14)
     
         # row 1: augmented
         jet_aug = augment_jet(jet_orig)
         eta, phi, pt, valid = jet_aug.T
         m1 = (valid == 1)
-        axes[1, col].scatter(eta[m1], phi[m1], s=pt[m1]*1e4, facecolors="none", edgecolors="C0", linewidths=lw, alpha=alpha)
-        axes[1, col].set_title(f"{cname} [augmented]")
+        #axes[1, col].scatter(eta[m1], phi[m1], s=pt[m1]*1e4, facecolors="none", edgecolors="C0", linewidths=lw, alpha=alpha)
+        #axes[1, col].set_title(f"{cname} [augmented]")
     
         # row 2: augmented + masks
         r_target = float(RNG.uniform(mask_ratio_range[0], mask_ratio_range[1]))
@@ -1179,20 +1179,22 @@ def plot_jets_aug(x, y, mask_ratio_range, idx):
         unmasked = (valid == 1) & (~mask_bool)
         masked = (valid == 1) & (mask_bool)
 
-        axes[2, col].scatter(eta[unmasked], phi[unmasked], s=pt[unmasked]*1e4, facecolors="none", edgecolors="C0", linewidths=lw, alpha=alpha)
-        axes[2, col].scatter(eta[masked], phi[masked], s=pt[masked]*1e4, facecolors="none", edgecolors="red", linewidths=lw, alpha=alpha)
+        axes[1, col].scatter(eta[unmasked], phi[unmasked], s=pt[unmasked]*1e4, facecolors="none", edgecolors="C0", linewidths=lw, alpha=alpha)
+        axes[1, col].scatter(eta[masked], phi[masked], s=pt[masked]*1e4, facecolors="none", edgecolors="red", linewidths=lw, alpha=alpha)
     
-        axes[2, col].set_title(f"{cname} [augmented+masked]")
+        axes[1, col].set_title(f"Aug. {cname} (masked in red, ~30% jet $p_\\mathrm{{T}}$)", fontsize=14)
     
         print(f"{cname}: r_target={r_target:.3f}, r_achieved={r_ach:.3f}, n_mask={masked.sum()} / n_valid={m1.sum()}")
     
-        for row in range(3):
+        for row in range(2):
             axes[row, col].set_xlim(-0.4, 0.4)
             axes[row, col].set_ylim(-0.4, 0.4)
-            axes[row, col].set_xlabel("Eta")
-            axes[row, col].set_ylabel("Phi")
+            axes[row, col].set_xlabel("Eta", fontsize=14)
+            axes[row, col].set_ylabel("Phi", fontsize=14)
     
     plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(f"{save_path}")
     plt.show()
     
 def plot_jbot_pretraining(history, save_path=None):
