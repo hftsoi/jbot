@@ -1537,49 +1537,92 @@ def plot_training_histories(hist_standalone, history_ft, labels):
     plt.tight_layout()
     plt.show()
 
-def pretrain_probe_5class(backbone, x_train, y_train, x_test, y_test, knn_n):
+def pretrain_probe_5class(backbone, x_train, y_train, x_test, y_test, knn_n, k_folds):
+    def _acc_auc_kfold(y_onehot, prob, k_folds=10, seed=42):
+        y_idx = y_onehot.argmax(1)
+        C = y_onehot.shape[1]
+    
+        y_pred = prob.argmax(1)
+        acc_full = accuracy_score(y_idx, y_pred)
+        auc_full = np.zeros((C,), dtype=np.float32)
+        for k in range(C):
+            fpr, tpr, _ = roc_curve(y_onehot[:, k], prob[:, k])
+            auc_full[k] = auc(fpr, tpr)
+        skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=seed)
+    
+        accs = []
+        aucs = []
+        for _, te_idx in skf.split(np.zeros_like(y_idx), y_idx):
+            y_te = y_onehot[te_idx]
+            p_te = prob[te_idx]
+    
+            accs.append(accuracy_score(y_te.argmax(1), p_te.argmax(1)))
+            fold_auc = np.full((C,), np.nan, dtype=np.float32)
+            for k in range(C):
+                fpr, tpr, _ = roc_curve(y_te[:, k], p_te[:, k])
+                fold_auc[k] = auc(fpr, tpr)
+            aucs.append(fold_auc)
+    
+        accs = np.asarray(accs, dtype=np.float32)
+        aucs = np.asarray(aucs, dtype=np.float32)
+    
+        acc_kf_mean = np.nanmean(accs)
+        acc_kf_std = np.nanstd(accs)
+        auc_kf_mean = np.nanmean(aucs, axis=0)
+        auc_kf_std = np.nanstd(aucs, axis=0)
+    
+        return acc_full, acc_kf_mean, acc_kf_std, auc_full, auc_kf_mean, auc_kf_std
+        
     z_cls_train = backbone.predict(x_train)[0]
     z_cls_test = backbone.predict(x_test)[0]
-    
+
     y_train_idx = y_train.argmax(1)
     y_test_idx = y_test.argmax(1)
-    
+
     knn = KNeighborsClassifier(n_neighbors=knn_n).fit(z_cls_train, y_train_idx)
-    acc_knn = accuracy_score(y_test_idx, knn.predict(z_cls_test))
-    
+    knn_p = knn.predict_proba(z_cls_test)
+
     scaler = StandardScaler().fit(z_cls_train)
     Z_cls_train = scaler.transform(z_cls_train)
-    Z_cls_test = scaler.transform(z_cls_test)
+    Z_cls_test  = scaler.transform(z_cls_test)
     logreg = LogisticRegression(max_iter=1000).fit(Z_cls_train, y_train_idx)
-    acc_linear = accuracy_score(y_test_idx, logreg.predict(Z_cls_test))
-    
-    maha_p = maha_classifier_prob(z_cls_train, y_train_idx, z_cls_test, cov_tied=True, reg=1e-8, l2norm=True, temp=1.0)
-    acc_maha = accuracy_score(y_test_idx, maha_p.argmax(1))
-    knn_p = knn.predict_proba(z_cls_test)
     linear_p = logreg.predict_proba(Z_cls_test)
 
-    print(f"maha acc:   {acc_maha:.4f}")
-    print(f"k-NN acc:   {acc_knn:.4f}")
-    print(f"linear acc: {acc_linear:.4f}")
+    maha_p = maha_classifier_prob(z_cls_train, y_train_idx, z_cls_test, cov_tied=True, reg=1e-8, l2norm=True, temp=1.0)
+
+    def _print_block(name, prob):
+        acc_full, acc_mu, acc_sd, auc_full, auc_mu, auc_sd = _acc_auc_kfold(
+            y_test, prob, k_folds=k_folds, seed=42
+        )
+        print(f"{name:7s} acc: {acc_full:.4f} ({acc_mu:.4f} +/- {acc_sd:.4f})")
+
+        class_names = ['q', 'g', 'W', 'Z', 't']
+        auc_str = " | ".join([f"{c}:{auc_full[i]:.4f} ({auc_mu[i]:.4f} +/- {auc_sd[i]:.4f})" for i, c in enumerate(class_names)])
+        print(f"{name:7s} AUC: {auc_str}")
+
+    _print_block("maha", maha_p); print()
+    _print_block("k-NN", knn_p); print()
+    _print_block("linear",linear_p); print()
+
     print_effsig_table(y_test, {"kNN": knn_p, "linear": linear_p, "maha": maha_p}, (0.1, 0.01, 0.001))
-    
+
     plt.figure(figsize=(7,6))
     class_names = ['q', 'g', 'W', 'Z', 't']
     class_colors = {'q': 'C3', 'g': 'C1', 'W': 'C2', 'Z': 'C0', 't': 'C4'}
-    
+
     for k, c in enumerate(class_names):
         fpr_knn, tpr_knn, _ = roc_curve(y_test[:, k], knn_p[:, k])
-        auc_knn = auc(fpr_knn, tpr_knn)
-        plt.plot(tpr_knn, fpr_knn, color=class_colors[c], label=f"{c} [k-NN] ({auc_knn:.4f})", linestyle="-", lw=1.5)
-    
+        plt.plot(tpr_knn, fpr_knn, color=class_colors[c],
+                 label=f"{c} [k-NN] ({auc(fpr_knn, tpr_knn):.4f})", linestyle="-", lw=1.5)
+
         fpr_linear, tpr_linear, _ = roc_curve(y_test[:, k], linear_p[:, k])
-        auc_linear = auc(fpr_linear, tpr_linear)
-        plt.plot(tpr_linear, fpr_linear, color=class_colors[c], label=f"{c} [linear] ({auc_linear:.4f})", linestyle="--", lw=1.5)
-    
+        plt.plot(tpr_linear, fpr_linear, color=class_colors[c],
+                 label=f"{c} [linear] ({auc(fpr_linear, tpr_linear):.4f})", linestyle="--", lw=1.5)
+
         fpr_maha, tpr_maha, _ = roc_curve(y_test[:, k], maha_p[:, k])
-        auc_maha = auc(fpr_maha, tpr_maha)
-        plt.plot(tpr_maha, fpr_maha, color=class_colors[c], label=f"{c} [maha] ({auc_maha:.4f})", linestyle="dotted", lw=1.5)
-    
+        plt.plot(tpr_maha, fpr_maha, color=class_colors[c],
+                 label=f"{c} [maha] ({auc(fpr_maha, tpr_maha):.4f})", linestyle="dotted", lw=1.5)
+
     plt.xlabel("TPR", size=16)
     plt.ylabel("FPR", size=16)
     plt.yscale("log")
