@@ -2340,8 +2340,6 @@ def run_ad_scan(
         cov_types = scan_gmm.get("cov_type", [])
         reg_covars = scan_gmm.get("reg_covar", [])
         gmm_seed = scan_gmm.get("seed", seed)
-        max_iters = scan_gmm.get("max_iter", [])
-        n_inits = scan_gmm.get("n_init", [])
         tag_fn = scan_gmm.get("tag", None)
 
         for M in Ms:
@@ -2350,21 +2348,17 @@ def run_ad_scan(
                 for K in Ks:
                     for cov_type in cov_types:
                         for reg_covar in reg_covars:
-                            for max_iter in max_iters:
-                                for n_init in n_inits:
-                                    score = gmm_score(
-                                        bank, z_test, K=K,
-                                        cov_type=cov_type,
-                                        l2norm=l2,
-                                        reg_covar=reg_covar,
-                                        seed=gmm_seed,
-                                        max_iter=max_iter,
-                                        n_init=n_init,
-                                    )
-                                    stats = {"W": _eval_sig(score, 2), "Z": _eval_sig(score, 3), "t": _eval_sig(score, 4), "all": _eval_all(score)}
-                                    cfg = {"M": M, "l2": l2, "K": K, "cov": cov_type, "reg": reg_covar}
-                                    tag = tag_fn(cfg) if callable(tag_fn) else _default_tag(prefix, cfg)
-                                    rows.append({"group": "gmm", "tag": tag, "stats": stats})
+                            score = gmm_score(
+                                bank, z_test, K=K,
+                                cov_type=cov_type,
+                                l2norm=l2,
+                                reg_covar=reg_covar,
+                                seed=gmm_seed
+                            )
+                            stats = {"W": _eval_sig(score, 2), "Z": _eval_sig(score, 3), "t": _eval_sig(score, 4), "all": _eval_all(score)}
+                            cfg = {"M": M, "l2": l2, "K": K, "cov": cov_type, "reg": reg_covar}
+                            tag = tag_fn(cfg) if callable(tag_fn) else _default_tag(prefix, cfg)
+                            rows.append({"group": "gmm", "tag": tag, "stats": stats})
 
     # compute top-N
     signals = ["W", "Z", "t", "all"]
