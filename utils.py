@@ -660,12 +660,13 @@ def train_jbot(x_train, epochs, batch_size, optimizer, base_lr, warmup_epochs, e
             # loss
             loss_uv, loss_cls_uv, loss_patch_uv = jbot_loss(
                 cls_s=cls_u_s, cls_t=cls_v_t,
-                patch_s=patch_u_s, patch_t=patch_v_t,
+                patch_s=patch_u_s, patch_t=patch_u_t,
                 mask_bool=mask_u, center_cls=center_cls, center_patch=center_patch, d_proj=d_proj
             )
+            
             loss_vu, loss_cls_vu, loss_patch_vu = jbot_loss(
                 cls_s=cls_v_s, cls_t=cls_u_t,
-                patch_s=patch_v_s, patch_t=patch_u_t,
+                patch_s=patch_v_s, patch_t=patch_v_t,
                 mask_bool=mask_v, center_cls=center_cls, center_patch=center_patch, d_proj=d_proj
             )
             loss = 0.5 * (loss_uv + loss_vu)
