@@ -1200,34 +1200,42 @@ def plot_jets_aug(x, y, mask_ratio_range, idx, save_path=None):
     
 def plot_jbot_pretraining(history, save_path=None):
     fig, ax = plt.subplots(2, 3, figsize=(8, 4), sharex=False)
-    lw=2
+    lw=5
+    title_size=12
+    label_size=10
     ax[0,0].plot(history["loss_total"], linewidth=lw)
-    ax[0,0].set_title("Loss (total)")
-    ax[0,0].set_xlabel("Epoch")
+    ax[0,0].set_title("Loss (total)", fontsize=title_size)
+    ax[0,0].set_xlabel("Epoch", fontsize=label_size)
+    ax[0,0].grid(alpha=0.5)
 
     ax[0,1].plot(history["loss_cls"], linewidth=lw)
-    ax[0,1].set_title("Loss ([CLS])")
-    ax[0,1].set_xlabel("Epoch")
+    ax[0,1].set_title("Loss ([CLS])", fontsize=title_size)
+    ax[0,1].set_xlabel("Epoch", fontsize=label_size)
+    ax[0,1].grid(alpha=0.5)
 
     ax[0,2].plot(history["loss_patch"], linewidth=lw)
-    ax[0,2].set_title("Loss (patch)")
-    ax[0,2].set_xlabel("Epoch")
+    ax[0,2].set_title("Loss (particle)", fontsize=title_size)
+    ax[0,2].set_xlabel("Epoch", fontsize=label_size)
+    ax[0,2].grid(alpha=0.5)
 
     ax[1,0].plot(history["loss_koleo"], linewidth=lw)
-    ax[1,0].set_title("Loss (koleo)")
-    ax[1,0].set_xlabel("Epoch")
+    ax[1,0].set_title("Loss (Koleo)", fontsize=title_size)
+    ax[1,0].set_xlabel("Epoch", fontsize=label_size)
+    ax[1,0].grid(alpha=0.5)
 
-    ax[1,1].plot(history["entropy_teacher"], label="teacher", linewidth=lw)
-    ax[1,1].plot(history["entropy_student"], label="student", linewidth=lw)
-    ax[1,1].set_title("Entropy")
-    ax[1,1].set_xlabel("Epoch")
-    ax[1,1].legend(fontsize=7)
+    ax[1,1].plot(history["entropy_teacher"], label="Teacher", linewidth=lw)
+    ax[1,1].plot(history["entropy_student"], label="Student", linewidth=lw)
+    ax[1,1].set_title("Entropy", fontsize=title_size)
+    ax[1,1].set_xlabel("Epoch", fontsize=label_size)
+    ax[1,1].legend(fontsize=10)
+    ax[1,1].grid(alpha=0.5)
 
-    ax[1,2].plot(history["center_cls"], label="CLS", linewidth=lw)
-    ax[1,2].plot(history["center_patch"], label="patch", linewidth=lw)
-    ax[1,2].set_title("Teacher centering norms")
-    ax[1,2].set_xlabel("Epoch")
-    ax[1,2].legend(fontsize=7)
+    ax[1,2].plot(history["center_cls"], label="[CLS]", linewidth=lw)
+    ax[1,2].plot(history["center_patch"], label="Particle", linewidth=lw)
+    ax[1,2].set_title("Centering norm", fontsize=title_size)
+    ax[1,2].set_xlabel("Epoch", fontsize=label_size)
+    ax[1,2].legend(fontsize=10)
+    ax[1,2].grid(alpha=0.5)
 
     #ax[2,0].plot(history["mask_token"], linewidth=lw)
     #ax[2,0].set_title("Learnable mask token")
