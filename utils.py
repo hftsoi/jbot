@@ -709,7 +709,7 @@ def train_jbot(x_train, epochs, batch_size, optimizer, base_lr, warmup_epochs, e
     }
 
     if save_student_snapshots:
-        os.makedirs(snapshot_dir, exist_ok=False)
+        os.makedirs(snapshot_dir, exist_ok=True)
         student.save_weights(f"{snapshot_dir}/student_epoch000.weights.h5")
 
     ds = (tf.data.Dataset.from_tensor_slices(x_train.astype("float32"))
