@@ -1200,7 +1200,7 @@ def plot_jets_aug(x, y, mask_ratio_range, idx, save_path=None):
     
 def plot_jbot_pretraining(history, save_path=None):
     fig, ax = plt.subplots(2, 3, figsize=(8, 4), sharex=False)
-    lw=5
+    lw=4
     title_size=12
     label_size=10
     ax[0,0].plot(history["loss_total"], linewidth=lw)
