@@ -1048,12 +1048,15 @@ class EarlyStoppingLogger(keras.callbacks.Callback):
             self.model.set_weights(self.best_weights)
 
 def scan_finetune_lr_decay(
-    base_lrs, decays,
+    base_lrs, decays, train_frac,
     x_train, y_train, x_val, y_val, x_test, y_test,
     d_model, n_heads, n_layers, n_classes,
     backbone_pretrain,
     epochs, batch_size, tolerance, patience
 ):
+    n = int(len(x_train) * train_frac)
+    x_train_f, y_train_f = x_train[:n], y_train[:n]
+    
     init_w = backbone_pretrain.get_weights()
 
     for base_lr in base_lrs:
@@ -1063,8 +1066,8 @@ def scan_finetune_lr_decay(
             lr = base_lr * (batch_size / 256)
             
             _, _, model_ft, _ = finetune(
-                x_train=x_train,
-                y_train=y_train,
+                x_train=x_train_f,
+                y_train=y_train_f,
                 x_val=x_val,
                 y_val=y_val,
                 d_model=d_model,
