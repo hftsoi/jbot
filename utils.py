@@ -1048,15 +1048,12 @@ class EarlyStoppingLogger(keras.callbacks.Callback):
             self.model.set_weights(self.best_weights)
 
 def scan_finetune_lr_decay(
-    base_lrs, decays, train_frac,
+    base_lrs, decays,
     x_train, y_train, x_val, y_val, x_test, y_test,
     d_model, n_heads, n_layers, n_classes,
     backbone_pretrain,
-    epochs, batch_size, tolerance, patience,
+    epochs, batch_size, tolerance, patience
 ):
-    n = int(len(x_train) * train_frac)
-    x_train_f, y_train_f = x_train[:n], y_train[:n]
-
     init_w = backbone_pretrain.get_weights()
 
     for base_lr in base_lrs:
@@ -1066,8 +1063,8 @@ def scan_finetune_lr_decay(
             lr = base_lr * (batch_size / 256)
             
             _, _, model_ft, _ = finetune(
-                x_train=x_train_f,
-                y_train=y_train_f,
+                x_train=x_train,
+                y_train=y_train,
                 x_val=x_val,
                 y_val=y_val,
                 d_model=d_model,
@@ -1084,7 +1081,7 @@ def scan_finetune_lr_decay(
             )
             p = model_ft.predict(x_test, verbose=0)
             acc = (p.argmax(1) == y_test.argmax(1)).mean()
-            print(f"base_lr={base_lr:.2e}  decay={decay:.2f}  train_frac={train_frac:.2f}  test_acc={acc:.4f}\n")
+            print(f"base_lr={base_lr:.0e}  decay={decay:.2f}  test_acc={acc:.4f}\n")
             
     backbone_pretrain.set_weights(init_w)
 
