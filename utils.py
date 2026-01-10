@@ -1928,7 +1928,7 @@ def plot_roc_ft_tqg(y_test_2, y_pred_standalone, y_pred_ft, save_path=None):
         plt.savefig(f"{save_path}")
     plt.show()
 
-def plot_ad_score_hist(score, y5, title):    
+def plot_ad_score_hist(score, y5, title, xlim=None, save_path=None):    
     yi = np.argmax(y5, axis=1)
     m_q = (yi == 0); m_g = (yi == 1); m_w = (yi == 2); m_z = (yi == 3); m_t = (yi == 4)
     groups = {"QCD": score[m_q | m_g], "W": score[m_w], "Z": score[m_z], "t": score[m_t]}
@@ -1937,13 +1937,17 @@ def plot_ad_score_hist(score, y5, title):
     
     plt.figure(figsize=(5, 4))
     for label in ["QCD", "W", "Z", "t"]:
-        plt.hist(groups[label], bins=100, density=True, histtype="step", linewidth=1.5, label=f"{label}")
+        plt.hist(groups[label], bins=100, density=True, histtype="step", linewidth=2, label=f"{label}")
 
     plt.xlabel("Anomaly score")
     plt.ylabel("Density")
+    if xlim is not None:
+        plt.xlim(xlim[0],xlim[1])
     plt.legend(loc="upper right")
     plt.title(title)
     plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(f"{save_path}")
     plt.show()
 
 def plot_ad_roc_one_score_three_signals(score, y5, title):
@@ -1972,31 +1976,83 @@ def plot_ad_roc_one_score_three_signals(score, y5, title):
     plt.tight_layout()
     plt.show()
 
-def plot_ad_roc_mult_scores_one_signal(scores_dict, y5, signal):
+def plot_ad_roc_mult_scores_one_signal(scores_dict, y5, signal, kfold=None, save_path=None):
     name_to_idx = {"W": 2, "Z": 3, "t": 4}
-    sig_idx = name_to_idx[signal]
     yi = np.argmax(y5, axis=1)
     bkg = (yi == 0) | (yi == 1)
-    sig = (yi == sig_idx)
+
+    if signal in name_to_idx:
+        sig = (yi == name_to_idx[signal])
+        title_sig = signal
+    if signal == "combined":
+        sig = (yi == 2) | (yi == 3) | (yi == 4)
+        title_sig = "Combined signal"
+
     m = bkg | sig
+    y_bin = sig[m]
 
     plt.figure(figsize=(7, 6))
-    y_bin = sig[m].astype(int)
 
-    for name, score in scores_dict.items():
-        s = np.asarray(score)[m]
-        fpr, tpr, _ = roc_curve(y_bin, s)
-        plt.plot(tpr, fpr, label=f"{name} ({auc(fpr,tpr):.4f})", lw=1.5)
+    if kfold is None:
+        for name, score in scores_dict.items():
+            s = np.asarray(score)[m]
+            fpr, tpr, _ = roc_curve(y_bin, s)
+            plt.plot(tpr, fpr, label=f"{name} ({auc(fpr, tpr):.4f})", lw=1.5)
+
+    else:
+        skf = StratifiedKFold(n_splits=kfold, shuffle=True, random_state=42)
+        tpr_grid = np.linspace(0.0, 1.0, 500)
+
+        for name, score in scores_dict.items():
+            s_all = np.asarray(score)[m]
+
+            fprs_interp = []
+            aucs = []
+            for _, te_idx in skf.split(np.zeros_like(y_bin), y_bin):
+                y_te = y_bin[te_idx]
+                s_te = s_all[te_idx]
+
+                fpr, tpr, _ = roc_curve(y_te, s_te)
+                aucs.append(auc(fpr, tpr))
+
+                order = np.argsort(tpr)
+                tpr_s = tpr[order]
+                fpr_s = fpr[order]
+
+                if tpr_s[0] > 0:
+                    tpr_s = np.r_[0.0, tpr_s]
+                    fpr_s = np.r_[fpr_s[0], fpr_s]
+                if tpr_s[-1] < 1:
+                    tpr_s = np.r_[tpr_s, 1.0]
+                    fpr_s = np.r_[fpr_s, fpr_s[-1]]
+
+                fprs_interp.append(np.interp(tpr_grid, tpr_s, fpr_s))
+
+            fprs_interp = np.asarray(fprs_interp)
+            mu = fprs_interp.mean(axis=0)
+            sd = fprs_interp.std(axis=0)
+
+            line, = plt.plot(
+                tpr_grid, mu,
+                label=f"{name} ({np.mean(aucs):.4f}±{np.std(aucs):.4f})",
+                lw=1.5, alpha=0.7
+            )
+            c = line.get_color()
+            low = np.clip(mu - sd, 1e-6, None)
+            high = np.clip(mu + sd, 1e-6, None)
+            plt.fill_between(tpr_grid, low, high, color=c, alpha=0.2, linewidth=0)
 
     plt.yscale("log")
     plt.ylim(1e-3, 1)
     plt.xlim(0, 1)
     plt.xlabel("TPR", fontsize=16)
     plt.ylabel("FPR", fontsize=16)
-    plt.title(f"{signal} vs QCD", fontsize=16)
-    plt.legend(loc="lower right", fontsize=9)
+    plt.title(f"{title_sig} vs QCD", fontsize=16)
+    plt.legend(loc="lower right", fontsize=12)
     plt.grid(alpha=0.5)
     plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(f"{save_path}")
     plt.show()
 
 def print_effsig_table(y_test, prob_dict, effbkg_targets):
@@ -2106,9 +2162,8 @@ def cosine_aggregate(sims, k, agg, temp):
         w = w / np.maximum(w.sum(axis=1, keepdims=True), 1e-12)
         return 1 - (w * s).sum(axis=1)
     if agg == "logsumexp":
-        m = s.max(axis=1, keepdims=True)
-        sim_lse = m[:, 0] + temp * np.log(np.mean(np.exp((s - m) / temp), axis=1) + 1e-12)
-        return 1 - sim_lse
+        sim_lse = temp*np.log(np.mean(np.exp(s / temp), axis=1) + 1e-12)
+        return - sim_lse
     raise ValueError("agg = 'max' / 'softmax_mean' / 'logsumexp'")
 
 def make_bank_with_labels(z_train, y_train5, M, seed):
@@ -2461,5 +2516,52 @@ def run_ad_scan(
         line = f"{r['tag']:<{tag_w}} | {cW} | {cZ} | {ct} | {ca}"
         print(line)
 
+def report_ad_kfold(scores_dict, y5, kfold, eff_b_targets, seed):
+    yi = y5.argmax(1)
+    bkg = (yi == 0) | (yi == 1)
+    sig_masks = {
+        "W": (yi == 2),
+        "Z": (yi == 3),
+        "t": (yi == 4),
+        "all": (yi == 2) | (yi == 3) | (yi == 4),
+    }
+
+    def _metrics(y_bin, s):
+        fpr, tpr, _ = roc_curve(y_bin, s)
+        aucv = auc(fpr, tpr)
+        effs = []
+        for eb in eff_b_targets:
+            ok = np.where(fpr <= eb)[0]
+            effs.append(tpr[ok].max() if ok.size else 0)
+        return aucv, effs
+
+    for sig_name, sig in sig_masks.items():
+        m = bkg | sig
+        y_bin = sig[m]
+
+        print(f"\n{sig_name} vs QCD  (k={kfold})")
+        print(f"{'method':10s}  {'AUC':>14s}  " + "  ".join([f"eff@{eb:g}".rjust(14) for eb in eff_b_targets]))
+        print("-" * (10 + 2 + 14 + 2 + (14 + 2) * len(eff_b_targets)))
+
+        for name, score in scores_dict.items():
+            s_all = np.asarray(score)[m]
+
+            skf = StratifiedKFold(n_splits=kfold, shuffle=True, random_state=seed)
+            aucs, effs = [], []
+            for _, te_idx in skf.split(np.zeros_like(y_bin), y_bin):
+                aucv, e = _metrics(y_bin[te_idx], s_all[te_idx])
+                aucs.append(aucv)
+                effs.append(e)
+
+            aucs = np.asarray(aucs)
+            effs = np.asarray(effs)
+
+            mu_auc, sd_auc = aucs.mean(), aucs.std()
+            mu_eff, sd_eff = effs.mean(axis=0), effs.std(axis=0)
+
+            cells = [f"{mu_auc:.4f}+/-{sd_auc:.4f}".rjust(14)]
+            cells += [f"{mu_eff[i]:.4f}+/-{sd_eff[i]:.4f}".rjust(14) for i in range(len(eff_b_targets))]
+            print(f"{name:10s}  " + "  ".join(cells))
+            
 
 
