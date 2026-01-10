@@ -1061,8 +1061,10 @@ def scan_finetune_lr_decay(
 
     for base_lr in base_lrs:
         for decay in decays:
+            
             backbone_pretrain.set_weights(init_w)
-
+            lr = base_lr * (batch_size / 256)
+            
             _, _, model_ft, _ = finetune(
                 x_train=x_train_f,
                 y_train=y_train_f,
@@ -1073,7 +1075,7 @@ def scan_finetune_lr_decay(
                 n_layers=n_layers,
                 n_classes=n_classes,
                 backbone_pretrain=backbone_pretrain,
-                base_lr=base_lr,
+                base_lr=lr,
                 decay=decay,
                 epochs=epochs,
                 batch_size=batch_size,
@@ -1082,7 +1084,7 @@ def scan_finetune_lr_decay(
             )
             p = model_ft.predict(x_test, verbose=0)
             acc = (p.argmax(1) == y_test.argmax(1)).mean()
-            print(f"base_lr={lr:.1e}  decay={decay:.2f}  train_frac={train_frac:.2f}  test_acc={acc:.4f}\n")
+            print(f"base_lr={base_lr:.2e}  decay={decay:.2f}  train_frac={train_frac:.2f}  test_acc={acc:.4f}\n")
             
     backbone_pretrain.set_weights(init_w)
 
