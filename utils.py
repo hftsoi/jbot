@@ -1912,7 +1912,7 @@ def plot_roc_ft_5class(y_test, y_pred_standalone, y_pred_ft, save_path=None):
     plt.show()
 
 def plot_roc_ft_5class_kfold(y_test, y_pred_ft, k_folds, save_path=None):
-    plt.figure(figsize=(7,6))
+    plt.figure(figsize=(5.5,5))
     class_names = ['q','g','W','Z','t']
     class_colors = ['C3','C1','C2','C0','C4']
 
@@ -1943,18 +1943,18 @@ def plot_roc_ft_5class_kfold(y_test, y_pred_ft, k_folds, save_path=None):
             tpr_sd = tprs.std(axis=0)
 
             plt.plot(tpr_mu, fpr_grid, color=class_colors[k], lw=1.5, linestyle='-',
-                     label=f"{c} ({np.mean(aucs):.4f} $\pm$ {np.std(aucs):.4f})")
+                     label=f"{c} ({np.mean(aucs):.4f}$\pm${np.std(aucs):.4f})")
 
             tpr_lo = np.clip(tpr_mu - tpr_sd, 0.0, 1.0)
             tpr_hi = np.clip(tpr_mu + tpr_sd, 0.0, 1.0)
             plt.fill_betweenx(fpr_grid, tpr_lo, tpr_hi, color=class_colors[k], alpha=0.2)
 
-    plt.xlabel("TPR", size=16)
-    plt.ylabel("FPR", size=16)
+    plt.xlabel("TPR", size=18)
+    plt.ylabel("FPR", size=18)
     plt.yscale("log")
     plt.ylim(1e-4, 1)
     plt.grid(alpha=0.5)
-    plt.legend(fontsize=12, loc='lower right')
+    plt.legend(fontsize=10.5, loc='lower right')
     plt.tight_layout()
     if save_path is not None:
         plt.savefig(f"{save_path}")
@@ -2017,7 +2017,7 @@ def plot_roc_tqg_kfold(
         "jBOT [FT]": y_pred_ft,
     }
 
-    plt.figure(figsize=(7,6))
+    plt.figure(figsize=(5.5,5))
     skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=seed)
 
     for name, P in prob_dict.items():
@@ -2038,7 +2038,7 @@ def plot_roc_tqg_kfold(
         mu = tprs.mean(axis=0)
         sd = tprs.std(axis=0)
 
-        plt.plot(mu, fpr_grid, lw=1.5, label=f"{name} ({np.mean(aucs):.4f} $\pm$ {np.std(aucs):.4f})")
+        plt.plot(mu, fpr_grid, lw=1.5, label=f"{name} ({np.mean(aucs):.4f}$\pm${np.std(aucs):.4f})")
         plt.fill_betweenx(
             fpr_grid,
             np.clip(mu - sd, 0.0, 1.0),
@@ -2046,13 +2046,13 @@ def plot_roc_tqg_kfold(
             alpha=0.2
         )
 
-    plt.xlabel("TPR", size=16)
-    plt.ylabel("FPR", size=16)
+    plt.xlabel("TPR", size=18)
+    plt.ylabel("FPR", size=18)
     plt.yscale("log")
     plt.ylim(1e-4, 1)
     plt.xlim(0, 1)
     #plt.title("Pretrained [CLS] embedding", size=15)
-    plt.legend(fontsize=12, loc="lower right")
+    plt.legend(fontsize=10.5, loc="lower right")
     plt.grid(alpha=0.5)
     plt.tight_layout()
     if save_path is not None:
@@ -2070,12 +2070,12 @@ def plot_ad_score_hist(score, y5, title, xlim=None, save_path=None):
     for label in ["QCD", "W", "Z", "t"]:
         plt.hist(groups[label], bins=100, density=True, histtype="step", linewidth=2, label=f"{label}")
 
-    plt.xlabel("Anomaly score")
-    plt.ylabel("Density")
+    plt.xlabel("Anomaly score", fontsize=14)
+    plt.ylabel("Density", fontsize=16)
     if xlim is not None:
         plt.xlim(xlim[0],xlim[1])
-    plt.legend(loc="upper right")
-    plt.title(title)
+    plt.legend(loc="upper right", fontsize=12)
+    plt.title(title, fontsize=14)
     plt.tight_layout()
     if save_path is not None:
         plt.savefig(f"{save_path}")
@@ -2122,7 +2122,7 @@ def plot_ad_roc_mult_scores_one_signal(scores_dict, y5, signal, kfold=None, save
     m = bkg | sig
     y_bin = sig[m]
 
-    plt.figure(figsize=(7, 6))
+    plt.figure(figsize=(5.5, 5))
 
     if kfold is None:
         for name, score in scores_dict.items():
@@ -2165,7 +2165,7 @@ def plot_ad_roc_mult_scores_one_signal(scores_dict, y5, signal, kfold=None, save
 
             line, = plt.plot(
                 tpr_grid, mu,
-                label=f"{name} ({np.mean(aucs):.4f}±{np.std(aucs):.4f})",
+                label=f"{name} ({np.mean(aucs):.4f}$\pm${np.std(aucs):.4f})",
                 lw=1.5, alpha=0.7
             )
             c = line.get_color()
@@ -2176,10 +2176,10 @@ def plot_ad_roc_mult_scores_one_signal(scores_dict, y5, signal, kfold=None, save
     plt.yscale("log")
     plt.ylim(1e-3, 1)
     plt.xlim(0, 1)
-    plt.xlabel("TPR", fontsize=16)
-    plt.ylabel("FPR", fontsize=16)
-    plt.title(f"{title_sig} vs QCD", fontsize=16)
-    plt.legend(loc="lower right", fontsize=12)
+    plt.xlabel("TPR", fontsize=18)
+    plt.ylabel("FPR", fontsize=18)
+    plt.title(f"{title_sig} vs QCD", fontsize=18)
+    plt.legend(loc="lower right", fontsize=13)
     plt.grid(alpha=0.5)
     plt.tight_layout()
     if save_path is not None:
