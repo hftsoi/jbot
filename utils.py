@@ -1911,6 +1911,55 @@ def plot_roc_ft_5class(y_test, y_pred_standalone, y_pred_ft, save_path=None):
         plt.savefig(f"{save_path}")
     plt.show()
 
+def plot_roc_ft_5class_kfold(y_test, y_pred_ft, k_folds, save_path=None):
+    plt.figure(figsize=(7,6))
+    class_names = ['q','g','W','Z','t']
+    class_colors = ['C3','C1','C2','C0','C4']
+
+    if k_folds is None:
+        for k, c in enumerate(class_names):
+            fpr, tpr, _ = roc_curve(y_test[:, k], y_pred_ft[:, k])
+            plt.plot(tpr, fpr, color=class_colors[k], lw=1.5, linestyle='-',
+                     label=f"{c} ({auc(fpr,tpr):.4f})")
+    else:
+        y_idx = y_test.argmax(1)
+        skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=42)
+        fpr_grid = np.logspace(-4, 0, 400)
+
+        for k, c in enumerate(class_names):
+            tprs = []
+            aucs = []
+            for _, te_idx in skf.split(np.zeros_like(y_idx), y_idx):
+                y_te = y_test[te_idx, k]
+                p_te = y_pred_ft[te_idx, k]
+                fpr, tpr, _ = roc_curve(y_te, p_te)
+
+                tpr_i = np.interp(fpr_grid, fpr, tpr, left=0.0, right=1.0)
+                tprs.append(tpr_i)
+                aucs.append(auc(fpr, tpr))
+
+            tprs = np.asarray(tprs)
+            tpr_mu = tprs.mean(axis=0)
+            tpr_sd = tprs.std(axis=0)
+
+            plt.plot(tpr_mu, fpr_grid, color=class_colors[k], lw=1.5, linestyle='-',
+                     label=f"{c} ({np.mean(aucs):.4f} $\pm$ {np.std(aucs):.4f})")
+
+            tpr_lo = np.clip(tpr_mu - tpr_sd, 0.0, 1.0)
+            tpr_hi = np.clip(tpr_mu + tpr_sd, 0.0, 1.0)
+            plt.fill_betweenx(fpr_grid, tpr_lo, tpr_hi, color=class_colors[k], alpha=0.2)
+
+    plt.xlabel("TPR", size=16)
+    plt.ylabel("FPR", size=16)
+    plt.yscale("log")
+    plt.ylim(1e-4, 1)
+    plt.grid(alpha=0.5)
+    plt.legend(fontsize=12, loc='lower right')
+    plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(f"{save_path}")
+    plt.show()
+
 def plot_roc_ft_tqg(y_test_2, y_pred_standalone, y_pred_ft, save_path=None):
     plt.figure(figsize=(7,6))
     pos_k = 1
@@ -1927,6 +1976,85 @@ def plot_roc_ft_tqg(y_test_2, y_pred_standalone, y_pred_ft, save_path=None):
     plt.ylim(1e-4,1)
     plt.title("MLP head + CLS embedding", size=16)
     plt.legend(fontsize=10, loc="lower right")
+    if save_path is not None:
+        plt.savefig(f"{save_path}")
+    plt.show()
+
+def plot_roc_tqg_kfold(
+    backbone,
+    x_train,
+    y_train_top,
+    x_test,
+    y_test_2,
+    y_pred_standalone,
+    y_pred_ft,
+    knn_n,
+    k_folds,
+    seed,
+    save_path=None,
+):
+    z_train = backbone.predict(x_train)[0]
+    z_test = backbone.predict(x_test)[0]
+
+    knn = KNeighborsClassifier(n_neighbors=knn_n).fit(z_train, y_train_top)
+    knn_p = knn.predict_proba(z_test)
+
+    scaler = StandardScaler().fit(z_train)
+    Z_train = scaler.transform(z_train)
+    Z_test = scaler.transform(z_test)
+    logreg = LogisticRegression(max_iter=2000).fit(Z_train, y_train_top)
+    linear_p = logreg.predict_proba(Z_test)
+
+    y_pos = y_test_2[:, 1].astype(int)
+    y_idx = y_pos
+
+    fpr_grid = np.logspace(-4, 0, 400)
+
+    prob_dict = {
+        "jBOT [$k$-NN]": knn_p,
+        "jBOT [linear]": linear_p,
+        "Supervised": y_pred_standalone,
+        "jBOT [FT]": y_pred_ft,
+    }
+
+    plt.figure(figsize=(7,6))
+    skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=seed)
+
+    for name, P in prob_dict.items():
+        s = P[:, 1]
+
+        tprs = []
+        aucs = []
+        for _, te_idx in skf.split(np.zeros_like(y_idx), y_idx):
+            y_te = y_pos[te_idx]
+            s_te = s[te_idx]
+            fpr, tpr, _ = roc_curve(y_te, s_te)
+
+            tpr_i = np.interp(fpr_grid, fpr, tpr, left=0.0, right=1.0)
+            tprs.append(tpr_i)
+            aucs.append(auc(fpr, tpr))
+
+        tprs = np.asarray(tprs)
+        mu = tprs.mean(axis=0)
+        sd = tprs.std(axis=0)
+
+        plt.plot(mu, fpr_grid, lw=1.5, label=f"{name} ({np.mean(aucs):.4f} $\pm$ {np.std(aucs):.4f})")
+        plt.fill_betweenx(
+            fpr_grid,
+            np.clip(mu - sd, 0.0, 1.0),
+            np.clip(mu + sd, 0.0, 1.0),
+            alpha=0.2
+        )
+
+    plt.xlabel("TPR", size=16)
+    plt.ylabel("FPR", size=16)
+    plt.yscale("log")
+    plt.ylim(1e-4, 1)
+    plt.xlim(0, 1)
+    #plt.title("Pretrained [CLS] embedding", size=15)
+    plt.legend(fontsize=12, loc="lower right")
+    plt.grid(alpha=0.5)
+    plt.tight_layout()
     if save_path is not None:
         plt.savefig(f"{save_path}")
     plt.show()
